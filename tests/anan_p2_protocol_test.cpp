@@ -358,9 +358,20 @@ int main()
         check(readU32(hpL, 17) == rx1, "legacy: DDC2 keeps RX1's own word");
         check(readU32(hpL, 329) == rx1, "legacy: the DUC word follows RX1");
         check((hpL[4] & 0x1E) == 0, "legacy: PTT bits stay clear");
+        // Bench, Brick3: the 6 m LPF bit (29) leaves only ADC noise on every HF
+        // band, so a bypassed HPF still takes the tuned band's LPF.
         check(readU32(hpL, 1432) == ((std::uint32_t{1} << 24) | (std::uint32_t{1} << 12)
-                                     | (std::uint32_t{1} << 29)),
-              "legacy bypass: ANT1 + HPF bypass + 6 m/bypass LPF");
+                                     | (std::uint32_t{1} << 20)),
+              "legacy bypass on 20 m: ANT1 + HPF bypass + 30/20 m LPF, not the 6 m bit");
+        check(legacyAlexLpfBitsFor(1'900'000.0) == (std::uint32_t{1} << 23), "LPF 160 m");
+        check(legacyAlexLpfBitsFor(3'700'000.0) == (std::uint32_t{1} << 22), "LPF 80 m");
+        check(legacyAlexLpfBitsFor(7'150'000.0) == (std::uint32_t{1} << 21), "LPF 60/40 m");
+        check(legacyAlexLpfBitsFor(10'120'000.0) == (std::uint32_t{1} << 20), "LPF 30/20 m");
+        check(legacyAlexLpfBitsFor(18'100'000.0) == (std::uint32_t{1} << 31), "LPF 17/15 m");
+        check(legacyAlexLpfBitsFor(24'930'000.0) == (std::uint32_t{1} << 30), "LPF 12/10 m");
+        check(legacyAlexLpfBitsFor(50'150'000.0) == (std::uint32_t{1} << 29), "LPF 6 m only on 6 m");
+        check(legacyAlexLpfBitsFor(0.0) == 0 && legacyAlexLpfBitsFor(std::nan("")) == 0,
+              "untuned: no LPF bit");
         const std::array<std::uint32_t, 4> ownDdc0{phaseWord(7'100'000.0), 0, rx1, 0};
         check(readU32(buildHighPriority(true, ownDdc0, true, true, 0, 0, legacy), 9)
                   == phaseWord(7'100'000.0),

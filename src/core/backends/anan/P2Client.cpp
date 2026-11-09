@@ -451,7 +451,7 @@ HighPriorityOptions P2Client::highPriorityOptions() const
         opts.adc0Filter = m_bandFiltersEnabled ? legacyAlexHpfFor(hz)
                                                : AlexRxFilter::Bypass;
         opts.antennaIndex = m_rxAntenna;
-        // The Brick3 picks its band filters from DDC0/1, not from Alex0.
+        // DDC0/DUC carry RX1's word too, as deskHPSDR sends them.
         opts.filterTuneWord = m_ddcFreqWords[static_cast<std::size_t>(m_linkDdc)];
         return opts;
     }

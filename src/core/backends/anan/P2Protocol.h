@@ -247,7 +247,8 @@ enum class AlexRxFilter {
 // the 20 MHz HPF; the 6 m preamp bit is never set by band).
 [[nodiscard]] AlexRxFilter legacyAlexHpfFor(double tunedHz) noexcept;
 // The low-pass bank in the Ant1/2/3 receive path (Alex0 bits 20-23, 29-31).
-// Exactly one bit; a non-finite frequency selects the widest (6 m/bypass).
+// One bit for the tuned band, the 6 m bit only above 32 MHz; untuned (0 Hz or
+// non-finite) gives none. Used whether or not the HPF is bypassed.
 [[nodiscard]] std::uint32_t legacyAlexLpfBitsFor(double hz) noexcept;
 
 enum class AlexScheme {
@@ -275,10 +276,10 @@ struct HighPriorityOptions {
     // (bits 24-26); anything else is ANT1.
     int antennaIndex = 0;
     // brick3-angelia, LegacyHpfLpf only. RX1's phase word, also written to
-    // DDC0 (when the caller left it zero) and to the DUC word (bytes 329-332).
-    // The Brick3 switches its band filters from the DDC0/1 frequencies
-    // (deskHPSDR new_protocol.c), so a receiver on DDC2 alone hears nothing.
-    // Inert for transmit: no PTT bit is ever set. 0 = write neither.
+    // DDC0 (when the caller left it zero) and to the DUC word (bytes 329-332),
+    // as deskHPSDR does: it notes the Brick3 switches band filters from the
+    // DDC0/1 frequencies. The gateware-121 bench unit received the same
+    // without them. Inert for transmit: no PTT bit is set. 0 = write neither.
     std::uint32_t filterTuneWord = 0;
 };
 

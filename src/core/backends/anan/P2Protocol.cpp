@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <limits>
 #include <cstring>
 
 namespace AetherSDR::anan {
@@ -216,7 +215,10 @@ std::uint32_t legacyAlexLpfBitsFor(double hz) noexcept
     constexpr std::uint32_t kLpf80      = std::uint32_t{1} << 22;
     constexpr std::uint32_t kLpf160     = std::uint32_t{1} << 23;
     const double mhz = hz / 1e6;
-    if (!std::isfinite(mhz) || mhz > 32.0)
+    // Untuned: no LPF bit, which passes HF on a Brick3 (the 6 m bit does not).
+    if (!std::isfinite(mhz) || mhz <= 0.0)
+        return 0;
+    if (mhz > 32.0)
         return kLpf6Bypass;
     if (mhz > 22.0)
         return kLpf12_10;
@@ -228,8 +230,6 @@ std::uint32_t legacyAlexLpfBitsFor(double hz) noexcept
         return kLpf60_40;
     if (mhz > 2.4)
         return kLpf80;
-    if (mhz <= 0.0)
-        return kLpf6Bypass;
     return kLpf160;
 }
 
@@ -253,8 +253,7 @@ std::array<std::uint8_t, 1444> buildHighPriority(bool run,
     if (opts.alexScheme == AlexScheme::LegacyHpfLpf) {
         // brick3-angelia: ANGELIA/ORION Alex0 = ANT1-3 (bits 24-26), ADC0's high-pass
         // selection, and the low-pass filter the receive path runs through
-        // (deskHPSDR new_protocol.c default case). A bypassed HPF takes the
-        // widest LPF so nothing is band-limited. No ADC1 bank and no speaker
+        // (deskHPSDR new_protocol.c default case). No ADC1 bank and no speaker
         // amplifier mute bit on these boards. Receive only: no T/R relay.
         if (opts.filterTuneWord != 0) {
             if (count == 0 || ddcFreqWords[0] == 0)
@@ -264,17 +263,12 @@ std::array<std::uint8_t, 1444> buildHighPriority(bool run,
         const int ant = (opts.antennaIndex >= 0 && opts.antennaIndex <= 2)
             ? opts.antennaIndex : 0;
         std::uint32_t alex0 = std::uint32_t{1} << (24 + ant);
-        bool bypassed = false;
-        if (opts.adc0Filter) {
-            alex0 |= alexRxFilterBits(*opts.adc0Filter);
-            bypassed = *opts.adc0Filter == AlexRxFilter::Bypass;
-        } else {
-            alex0 |= std::uint32_t{1} << 12;
-            bypassed = true;
-        }
-        alex0 |= bypassed
-            ? legacyAlexLpfBitsFor(std::numeric_limits<double>::infinity())
-            : legacyAlexLpfBitsFor(opts.rxLpfFrequencyHz);
+        alex0 |= opts.adc0Filter ? alexRxFilterBits(*opts.adc0Filter)
+                                 : std::uint32_t{1} << 12;
+        // The LPF follows the tuned band even with the HPF bypassed, as in
+        // Thetis: on a Brick3 the 6 m bit (29) cuts HF off entirely (bench,
+        // 160-10 m: ADC noise only, vs. +9-18 dB of band noise with the band's LPF).
+        alex0 |= legacyAlexLpfBitsFor(opts.rxLpfFrequencyHz);
         writeU32be(&pkt[1432], alex0);
         pkt[1443] = static_cast<std::uint8_t>(
             std::clamp(adc0AttenuationDb, 0, kMaxStepAttenuationDb));
