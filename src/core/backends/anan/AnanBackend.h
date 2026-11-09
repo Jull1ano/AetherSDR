@@ -26,9 +26,10 @@ namespace AetherSDR::anan {
 // IRadioBackend for the ANAN-G2 (openHPSDR Protocol 2). Owns one P2Client and
 // one AnanRxDsp on a dedicated I/O thread, like Hl2Backend with MetisClient +
 // Hl2RxDsp. Scope: one DDC, RX only.
-//   - No NCO/WDSP-shift split: RX1's DDC retunes on every setSliceFrequency()/
-//     setPanCenter(), so "the shift is ALWAYS exactly -cwBfoHz(mode), because
-//     the NCO IS the slice frequency".
+//   - NCO/WDSP-shift split (brick3-angelia, as Hl2Backend): the slice tunes
+//     inside a fixed DDC span by WDSP shift (slice - NCO - cwBfoHz); the DDC
+//     recentres only when the slice leaves the usable span, and setPanCenter()
+//     moves the DDC, pulling the slice along only at that edge.
 //   - capabilities()' identity strings are fixed; gateware, DDC count and board
 //     id come from this session's Discovery reply once it lands.
 //   - setKeying() is a no-op: canTransmit is false and P2Client has no PTT
@@ -360,6 +361,18 @@ private:
     // order, to m_dsp. HERMES.md §16.7: mode changes must re-push the
     // passband, every time, not only when its value changed.
     void pushModeFilterShift();
+    // brick3-angelia: the slice moves inside a fixed DDC span (Thetis CTUN,
+    // Hl2Backend). WDSP's shift is slice - NCO, then the CW BFO (HERMES.md
+    // §16.2, §5); pushShift() queues it to the DSP.
+    [[nodiscard]] double usableHalfSpanHz() const noexcept
+    {
+        return m_pendingParams.rx1RateKsps * 1000.0 / 2.0 * kUsablePassbandFraction;
+    }
+    [[nodiscard]] double rxShiftHz() const noexcept
+    {
+        return (m_sliceFreqHz - m_ncoHz) - cwBfoHz();
+    }
+    void pushShift();
 
     QThread* m_ioThread = nullptr;
     P2Client* m_client = nullptr;    // lives on m_ioThread; nullptr parent (moveToThread requires it)
@@ -433,6 +446,11 @@ private:
     int m_filterHighHz = 2900;
     int m_cwPitchHz = 600;
     double m_sliceFreqHz = 0.0;
+    // brick3-angelia: RX1's DDC centre, i.e. the pan centre. It stays put
+    // while the slice tunes inside kUsablePassbandFraction of the half-span
+    // and recentres on the slice beyond it, as Hl2Backend's ncoHz does.
+    double m_ncoHz = 0.0;
+    static constexpr double kUsablePassbandFraction = 0.8;   // Hl2Backend's
     // What applyRestoredState() accepted, held for connectRadio(); kept apart
     // from the live m_sliceFreqHz/m_mode. Zero/empty: nothing restored.
     double m_restoredFreqHz = 0.0;

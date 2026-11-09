@@ -537,7 +537,9 @@ RadioCapabilities AnanBackend::capabilities() const
     c.receiveAudioControl = ReceiveAudioControl{SliceFrequencyControl::Authority::Engine};
     c.receiveAudioExport = std::nullopt; // native DAX export not qualified for this backend
     c.dspParameterReset = std::nullopt;
-    c.receivePanCenterControl = std::nullopt; // center also retunes the slice
+    // Absent: a centre move pulls the slice along at the usable edge, which
+    // a declared center control promises never to do.
+    c.receivePanCenterControl = std::nullopt;
     c.receivePanBandwidthControl = ReceivePanRangeControl{SliceFrequencyControl::Authority::Engine,
                                                          48'000, 1'536'000};
     c.canTransmit = false;         // P2Client has no PTT capability -- see class comment
@@ -783,6 +785,11 @@ void AnanBackend::connectRadio(const RadioConnectRequest& request)
     }
     m_mode = mode;
 
+    // A session starts centred on the slice. The shift is re-sent because
+    // AnanRxDsp outlives a session and re-applies its last one at install.
+    m_ncoHz = m_sliceFreqHz;
+    pushShift();
+
     m_speakerAudioEnabled = m_pendingParams.speakerAudioEnabled;
     m_pendingDspConfig = AnanRxDsp::Config{};
     m_pendingDspConfig.inputSampleRateHz = m_pendingParams.rx1RateKsps * 1000;
@@ -915,8 +922,8 @@ void AnanBackend::startP2ClientSession(quint64 generation)
         // linkUp() (P2Client's own signal, connected in the constructor)
         // is what actually fires connected()/emitSliceState()/emitPanState()
         // once the first genuine IQ frame arrives -- not this call.
-        if (m_sliceFreqHz > 0.0)
-            m_client->setDdcFrequencyHz(kRx1Route.ddc, m_sliceFreqHz);
+        if (m_ncoHz > 0.0)
+            m_client->setDdcFrequencyHz(kRx1Route.ddc, m_ncoHz);
     }, Qt::QueuedConnection);
 }
 
@@ -982,29 +989,35 @@ void AnanBackend::pushModeFilterShift()
     QMetaObject::invokeMethod(m_dsp, "setFilter", Qt::QueuedConnection,
         Q_ARG(double, static_cast<double>(m_filterLowHz) + bfo),
         Q_ARG(double, static_cast<double>(m_filterHighHz) + bfo));
-    // No NCO-vs-slice offset in this backend (see the class comment) --
-    // the shift is exactly the CW BFO, negated (HERMES §5: the shift names
-    // the RF frequency the detector treats as zero, so pushing that zero
-    // DOWN a pitch is what lifts the marker UP onto it).
-    QMetaObject::invokeMethod(m_dsp, "setShift", Qt::QueuedConnection, Q_ARG(double, -bfo));
+    // The slice's offset from the DDC centre, then the CW BFO negated (HERMES
+    // §5: the shift names the RF frequency the detector treats as zero, so
+    // pushing that zero DOWN a pitch is what lifts the marker UP onto it).
+    pushShift();
+}
+
+void AnanBackend::pushShift()
+{
+    if (m_dsp)
+        QMetaObject::invokeMethod(m_dsp, "setShift", Qt::QueuedConnection,
+                                  Q_ARG(double, rxShiftHz()));
 }
 
 void AnanBackend::setSliceFrequency(int sliceId, double hz)
 {
     Q_UNUSED(sliceId);   // one slice in this phase
     m_sliceFreqHz = hz;
+    // The DDC stays put while the slice is inside the usable span -- the
+    // spectrum holds still and only the VFO moves, as in Thetis and
+    // Hl2Backend::setSliceFrequency(). Leaving it recentres the DDC.
+    if (!(m_ncoHz > 0.0) || std::abs(hz - m_ncoHz) > usableHalfSpanHz())
+        m_ncoHz = hz;
     // Digit readout / slice model: unthrottled. Cheap (no radio round trip,
     // no pan re-layout), and it is what makes a drag gesture feel like it is
     // tracking the mouse at all.
     emitSliceState();
-    // Everything that touches the radio or the pan's display geometry goes
-    // through the coalescing throttle instead of firing here directly -- see
-    // applyTuneToRadioAndPan()'s comment for why: a click/drag-tune gesture
-    // calls this once per mouse-move event (tens of times a second), and
-    // Phase 1b has no NCO-vs-slice decoupling (the class comment is explicit:
-    // "the shift is ALWAYS exactly -cwBfoHz... because the NCO IS the slice
-    // frequency, always") -- so unthrottled, EVERY one of those events would
-    // retune the actual DDC hardware and re-broadcast the pan's geometry.
+    // The shift, the DDC retune and the pan's geometry go through the
+    // coalescing throttle -- see applyTuneToRadioAndPan()'s comment: a
+    // click/drag-tune gesture calls this once per mouse-move event.
     scheduleTuneApply();
     // The Tuning capture rides the same throttle: applyTuneToRadioAndPan().
 }
@@ -1259,17 +1272,25 @@ void AnanBackend::setPanCenter(const QString& panId, double hz, PanCenterIntent 
 {
     Q_UNUSED(panId);   // one pan in this phase
     Q_UNUSED(intent);  // ignored, matching Hl2Backend::setPanCenter
-    // The NCO is the slice, so a pan centre is a retune -- applied from the
-    // event loop, not here. RadioModel::requestPanDisplay() holds a fence
-    // across this call, and the sliceChanged a retune publishes at once lets
-    // the GUI's slice-follow re-enter requestPanCenter(), which trips that
-    // fence: every pan drag and Ctrl+wheel zoom was reported refused after
-    // the radio had already moved (brick3-angelia). Hl2Backend never meets
-    // this: its pan centre moves the NCO under a fixed slice frequency.
-    if (!std::isfinite(hz) || hz == m_sliceFreqHz)
-        return;   // nothing to move; also ends the slice-follow echo
-    QMetaObject::invokeMethod(this, [this, hz] { setSliceFrequency(kSliceId, hz); },
-                              Qt::QueuedConnection);
+    // A pan centre moves the DDC; the slice keeps its frequency and is pushed
+    // along only when it would leave the usable span, so the audio never
+    // comes from outside the sampled band (Thetis CTUN). Applied from the
+    // event loop, not here: RadioModel::requestPanDisplay() holds a fence
+    // across this call, and a sliceChanged published inside it lets the
+    // GUI's slice-follow re-enter requestPanCenter() and trip that fence --
+    // every drag and Ctrl+wheel zoom then read as refused (brick3-angelia).
+    if (!std::isfinite(hz) || hz <= 0.0 || hz == m_ncoHz)
+        return;   // nothing to move; also ends a slice-follow echo
+    QMetaObject::invokeMethod(this, [this, hz] {
+        m_ncoHz = hz;
+        const double usable = usableHalfSpanHz();
+        const double kept = std::clamp(m_sliceFreqHz, m_ncoHz - usable, m_ncoHz + usable);
+        if (kept != m_sliceFreqHz) {
+            m_sliceFreqHz = kept;
+            emitSliceState();
+        }
+        scheduleTuneApply();
+    }, Qt::QueuedConnection);
 }
 
 int AnanBackend::nearestDdc0RateKsps(int requestedKsps) noexcept
@@ -1342,6 +1363,12 @@ void AnanBackend::beginRateChange(int newRateKsps)
     m_preRateChangeKsps = m_pendingParams.rx1RateKsps;
     m_pendingParams.rx1RateKsps = newRateKsps;
     m_pendingDspConfig.inputSampleRateHz = newRateKsps * 1000;
+    // A narrower span can leave the slice outside it: recentre the DDC on the
+    // slice so the audio stays inside the sampled band (brick3-angelia).
+    if (std::abs(m_sliceFreqHz - m_ncoHz) > usableHalfSpanHz()) {
+        m_ncoHz = m_sliceFreqHz;
+        scheduleTuneApply();
+    }
     // Refresh from CURRENT live operator state, not connectRadio()'s
     // connect-time snapshot: m_pendingDspConfig otherwise only ever had its
     // rate touched here, so a rate change silently reverted mode/filter/AGC
@@ -1935,7 +1962,7 @@ void AnanBackend::emitPanState()
     // the next rate. The decimation roll-off stays visible (and is corrected by the
     // droop tables).
     m_droopCalibrator.setLandedRate(static_cast<int>(sampleRateHz / 1000.0));
-    emit panCenterBandwidthChanged(kPanId, m_sliceFreqHz / 1.0e6, sampleRateHz / 1.0e6);
+    emit panCenterBandwidthChanged(kPanId, m_ncoHz / 1.0e6, sampleRateHz / 1.0e6);
 }
 
 void AnanBackend::resetSpeakerResamplers()
@@ -2055,11 +2082,14 @@ void AnanBackend::applyTuneToRadioAndPan()
     // re-lays-out the spectrum/waterfall geometry on every call). Both are
     // throttled together by scheduleTuneApply() -- see its comment.
     if (m_client && m_connected) {
-        const double hz = m_sliceFreqHz;
+        const double hz = m_ncoHz;   // the DDC centre, not the slice
         QMetaObject::invokeMethod(m_client,
                                   [this, hz]() { m_client->setDdcFrequencyHz(kRx1Route.ddc, hz); },
                                   Qt::QueuedConnection);
     }
+    // The slice's place inside the span. Sent with the retune so a recentre
+    // and its shift reach the radio and the DSP together.
+    pushShift();
     emitPanState();
     // Tuning capture, once per settled gesture. Outside the connected guard:
     // where the dial ended up is worth keeping even during a teardown.
