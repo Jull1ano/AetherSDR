@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cmath>
 #include <complex>
+#include <cstdint>
 #include <memory>
 #include <numbers>
 #include <vector>
@@ -364,6 +365,12 @@ private:
     qint64 m_lastSpectrumMs = 0;
 
     std::vector<std::complex<float>> m_iqBuffer;    // IQ awaiting a full DSP block
+    // brick3-angelia: how long the head block has waited for WDSP's output
+    // (processIqBlock()); past kExchangeStallNs it is dropped unexchanged.
+    // 20 ms: four blocks at 192 ksps, a worker turns one round in well under 1.
+    QElapsedTimer m_exchangeHeadWait;
+    static constexpr qint64 kExchangeStallNs = 20'000'000;
+    std::uint64_t m_exchangeStallDrops = 0;
     std::vector<float> m_i, m_q;                    // deinterleaved input scratch
     std::vector<float> m_left, m_right;             // WdspChannel output scratch
     DcBlocker m_dcBlockL, m_dcBlockR;

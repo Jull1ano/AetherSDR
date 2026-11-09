@@ -171,6 +171,7 @@ void AnanRxDsp::installChannel(RebuildResult result)
     m_config.inputSampleRateHz = result.inputSampleRateHz;
 
     m_iqBuffer.clear();
+    m_exchangeHeadWait.invalidate();   // a fresh channel starts primed
     m_i.assign(static_cast<std::size_t>(m_config.dspBlockSize), 0.0f);
     m_q.assign(static_cast<std::size_t>(m_config.dspBlockSize), 0.0f);
     m_left.assign(result.outputBlockSize, 0.0f);
@@ -495,6 +496,28 @@ void AnanRxDsp::processIqBlock(const std::vector<std::complex<float>>& iq)
     const std::size_t block = static_cast<std::size_t>(m_config.dspBlockSize);
     std::size_t consumed = 0;
     while (m_iqBuffer.size() - consumed >= block) {
+        // Exchange only once the worker has produced the output this call
+        // reads (WDSP patch 15, as Hl2TxDsp::exchangeDueBlocks()). Packets
+        // arrive in bursts; exchanged back-to-back, the second block
+        // underruns, fexchange2 advances its read index anyway, and later
+        // blocks come from the wrong slot of the two-slot ring -- heard as
+        // ticks (brick3-angelia). The next packet retries; a worker stalled
+        // past kExchangeStallNs drops the block unexchanged.
+        if (!m_channel->outputReady()) {
+            if (!m_exchangeHeadWait.isValid())
+                m_exchangeHeadWait.start();
+            if (m_exchangeHeadWait.nsecsElapsed() < kExchangeStallNs)
+                break;
+            m_exchangeHeadWait.invalidate();
+            ++m_exchangeStallDrops;
+            if (m_exchangeStallDrops == 1 || m_exchangeStallDrops % 64 == 0) {
+                qCWarning(lcAnanRxDsp) << "WDSP worker stalled; dropped an unexchanged"
+                                       << "IQ block," << m_exchangeStallDrops << "so far";
+            }
+            consumed += block;
+            continue;
+        }
+        m_exchangeHeadWait.invalidate();
         if (m_audioMuted) {
             std::fill(m_i.begin(), m_i.end(), 0.0f);
             std::fill(m_q.begin(), m_q.end(), 0.0f);
