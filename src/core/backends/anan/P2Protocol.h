@@ -122,7 +122,35 @@ struct DiscoveryReply {
     // firmware version are the load-bearing fields for that. This predicate
     // only answers "should a radio picker show this reply as an ANAN-G2".
     [[nodiscard]] constexpr bool isSaturn() const noexcept { return boardId == 10; }
+    // brick3-angelia: ANGELIA (3, ANAN-100D and its clones such as the Brick3)
+    // and ORION (4, ANAN-200D) run the classic Alex front end: high-pass
+    // filters on the receive input plus the TX low-pass bank in the receive
+    // path. Receive-only support, same session code as the G2.
+    [[nodiscard]] constexpr bool isLegacyAlexBoard() const noexcept
+    {
+        return boardId == 3 || boardId == 4;
+    }
+    // The boards a radio picker lists as ANAN Protocol 2 radios.
+    [[nodiscard]] constexpr bool isSupportedAnan() const noexcept
+    {
+        return isSaturn() || isLegacyAlexBoard();
+    }
 };
+
+// Model shown for a discovery board id (brick3-angelia).
+[[nodiscard]] constexpr const char* ananModelForBoard(std::uint8_t boardId) noexcept
+{
+    switch (boardId) {
+    case 3:  return "ANAN-100D";
+    case 4:  return "ANAN-200D";
+    default: return "ANAN-G2";
+    }
+}
+
+[[nodiscard]] constexpr bool isLegacyAlexBoardId(std::uint8_t boardId) noexcept
+{
+    return boardId == 3 || boardId == 4;
+}
 
 // Byte 22 per spec p.45: ZERO means big-endian 3-byte I&Q (not "none", not
 // little-endian); nonzero is a bitmask with bit 0 = BE. A real G2 sends 0 and
@@ -213,6 +241,20 @@ enum class AlexRxFilter {
 // opt-in. Below 1.5 MHz, and for a non-finite frequency, it is Bypass.
 [[nodiscard]] AlexRxFilter alexRxFilterFor(double tunedHz) noexcept;
 
+// brick3-angelia: classic Alex (ANGELIA/ORION). The same HPF bits as above
+// (bits 1-6, 12) with Thetis/deskHPSDR's high-pass edges: 1.5 MHz HPF from
+// 1.8 MHz, 6.5 from 6.5, 9.5 from 9.5, 13 from 13, 20 from 20 MHz (6 m keeps
+// the 20 MHz HPF; the 6 m preamp bit is never set by band).
+[[nodiscard]] AlexRxFilter legacyAlexHpfFor(double tunedHz) noexcept;
+// The low-pass bank in the Ant1/2/3 receive path (Alex0 bits 20-23, 29-31).
+// Exactly one bit; a non-finite frequency selects the widest (6 m/bypass).
+[[nodiscard]] std::uint32_t legacyAlexLpfBitsFor(double hz) noexcept;
+
+enum class AlexScheme {
+    SaturnBandPass,   // ANAN-G2: per-ADC band-pass banks (default)
+    LegacyHpfLpf,     // ANAN-100D/200D: HPF + LPF in Alex0, no ADC1 bank
+};
+
 // The High Priority fields that apply live, beyond the bypass flags. Defaults
 // reproduce the bytes this client sends with no options.
 struct HighPriorityOptions {
@@ -225,6 +267,10 @@ struct HighPriorityOptions {
     // Sending silent speaker audio leaves the amplifier running and hissing.
     // Byte 1400's bit 0 (XVTR route on PTT) and bit 2 (tuner start) stay clear.
     bool muteSpeakerAmp = false;
+    // brick3-angelia: front-end layout and, for LegacyHpfLpf, the frequency
+    // the receive low-pass filter follows.
+    AlexScheme alexScheme = AlexScheme::SaturnBandPass;
+    double rxLpfFrequencyHz = 0.0;
 };
 
 // 1444-byte High Priority packet. RX-ONLY: `run` sets byte 4 bit[0] only and

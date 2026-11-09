@@ -3376,14 +3376,14 @@ ConnectionPanel::AnanProbeResult ConnectionPanel::probeAnan(
             // Board type 10 (SATURN) only -- this project supports the G2
             // bring-up radio and no other Protocol 2 board (RFC §2.11), same
             // predicate AnanDiscovery applies to broadcast replies.
-            if (!reply || !reply->isSaturn())
+            if (!reply || !reply->isSupportedAnan())
                 continue;
 
             RadioInfo info;
             info.family   = QString::fromLatin1(kFamilyAnan);
             info.address  = dest;
             info.port     = anan::kRadioPort;
-            info.model    = QStringLiteral("ANAN-G2");
+            info.model    = QString::fromLatin1(anan::ananModelForBoard(reply->boardId));
             info.name     = info.model;
             info.serial   = anan::AnanDiscovery::macToSerial(reply->mac);
             info.nickname = anan::AnanDiscovery::effectiveNickname(info.family, info.serial,

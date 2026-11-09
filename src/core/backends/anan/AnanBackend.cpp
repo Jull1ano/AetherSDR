@@ -485,7 +485,7 @@ RadioCapabilities AnanBackend::capabilities() const
     // agcKnobDb()'s scale, so the AGC-T tooltips show the gain, not the knob.
     c.agcGainScale = RadioCapabilities::AgcGainScale{kAgcKnobMinDb, kAgcKnobDbPerStep};
     c.manufacturer = QStringLiteral("Apache Labs");
-    c.model = QStringLiteral("ANAN-G2");
+    c.model = QString::fromLatin1(anan::ananModelForBoard(m_discoveredBoardId));
     // The session takes its receive front-end options from AnanSettings
     // (populateFamilyParams()), so the setup page that edits them applies.
     c.adcFrontEnd = RadioCapabilities::AdcFrontEnd{};

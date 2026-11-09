@@ -329,15 +329,15 @@ void AnanDiscovery::onReadyRead()
         const auto reply = parseDiscoveryReply(
             {reinterpret_cast<const std::uint8_t*>(data.constData()),
              static_cast<std::size_t>(data.size())});
-        if (!reply || !reply->isSaturn())
-            continue;   // not an ANAN-G2 (or not a discovery reply at all)
+        if (!reply || !reply->isSupportedAnan())
+            continue;   // not an ANAN-G2/100D/200D (or not a discovery reply)
         m_log.replyListed();
 
         RadioInfo info;
         info.family   = QStringLiteral("anan");
         info.address  = dg.senderAddress();
         info.port     = kRadioPort;
-        info.model    = QStringLiteral("ANAN-G2");
+        info.model    = QString::fromLatin1(ananModelForBoard(reply->boardId));
         info.name     = info.model;
         info.serial   = macToSerial(reply->mac);
         info.nickname = effectiveNickname(QStringLiteral("anan"), info.serial, info.model);

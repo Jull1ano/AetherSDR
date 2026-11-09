@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <cstring>
 
 namespace AetherSDR::anan {
@@ -189,6 +190,49 @@ AlexRxFilter alexRxFilterFor(double tunedHz) noexcept
     return AlexRxFilter::Preamp6m;        // 6 m
 }
 
+AlexRxFilter legacyAlexHpfFor(double tunedHz) noexcept
+{
+    const double mhz = tunedHz / 1e6;
+    if (!std::isfinite(mhz) || mhz < 1.8)
+        return AlexRxFilter::Bypass;
+    if (mhz < 6.5)
+        return AlexRxFilter::Bpf1_5MHz;   // bit 6: 1.5 MHz HPF (160-60 m)
+    if (mhz < 9.5)
+        return AlexRxFilter::Bpf6_5MHz;   // bit 5: 6.5 MHz HPF (40 m)
+    if (mhz < 13.0)
+        return AlexRxFilter::Bpf9_5MHz;   // bit 4: 9.5 MHz HPF (30 m)
+    if (mhz < 20.0)
+        return AlexRxFilter::Bpf13MHz;    // bit 1: 13 MHz HPF (20/17 m)
+    return AlexRxFilter::Bpf20MHz;        // bit 2: 20 MHz HPF (15 m - 6 m)
+}
+
+std::uint32_t legacyAlexLpfBitsFor(double hz) noexcept
+{
+    constexpr std::uint32_t kLpf6Bypass = std::uint32_t{1} << 29;
+    constexpr std::uint32_t kLpf12_10   = std::uint32_t{1} << 30;
+    constexpr std::uint32_t kLpf17_15   = std::uint32_t{1} << 31;
+    constexpr std::uint32_t kLpf30_20   = std::uint32_t{1} << 20;
+    constexpr std::uint32_t kLpf60_40   = std::uint32_t{1} << 21;
+    constexpr std::uint32_t kLpf80      = std::uint32_t{1} << 22;
+    constexpr std::uint32_t kLpf160     = std::uint32_t{1} << 23;
+    const double mhz = hz / 1e6;
+    if (!std::isfinite(mhz) || mhz > 32.0)
+        return kLpf6Bypass;
+    if (mhz > 22.0)
+        return kLpf12_10;
+    if (mhz > 15.0)
+        return kLpf17_15;
+    if (mhz > 8.0)
+        return kLpf30_20;
+    if (mhz > 4.5)
+        return kLpf60_40;
+    if (mhz > 2.4)
+        return kLpf80;
+    if (mhz <= 0.0)
+        return kLpf6Bypass;
+    return kLpf160;
+}
+
 std::array<std::uint8_t, 1444> buildHighPriority(bool run,
                                                   std::span<const std::uint32_t> ddcFreqWords,
                                                   bool bypassAdc0Filters,
@@ -206,6 +250,31 @@ std::array<std::uint8_t, 1444> buildHighPriority(bool run,
         std::min(ddcFreqWords.size(), static_cast<std::size_t>(kMaxDdcs));
     for (std::size_t n = 0; n < count; ++n)
         writeU32be(&pkt[9 + 4 * n], ddcFreqWords[n]);
+    if (opts.alexScheme == AlexScheme::LegacyHpfLpf) {
+        // brick3-angelia: ANGELIA/ORION Alex0 = ANT1 (bit 24), ADC0's high-pass
+        // selection, and the low-pass filter the receive path runs through
+        // (deskHPSDR new_protocol.c default case). A bypassed HPF takes the
+        // widest LPF so nothing is band-limited. No ADC1 bank and no speaker
+        // amplifier mute bit on these boards. Receive only: no T/R relay.
+        std::uint32_t alex0 = std::uint32_t{1} << 24;
+        bool bypassed = false;
+        if (opts.adc0Filter) {
+            alex0 |= alexRxFilterBits(*opts.adc0Filter);
+            bypassed = *opts.adc0Filter == AlexRxFilter::Bypass;
+        } else {
+            alex0 |= std::uint32_t{1} << 12;
+            bypassed = true;
+        }
+        alex0 |= bypassed
+            ? legacyAlexLpfBitsFor(std::numeric_limits<double>::infinity())
+            : legacyAlexLpfBitsFor(opts.rxLpfFrequencyHz);
+        writeU32be(&pkt[1432], alex0);
+        pkt[1443] = static_cast<std::uint8_t>(
+            std::clamp(adc0AttenuationDb, 0, kMaxStepAttenuationDb));
+        pkt[1442] = static_cast<std::uint8_t>(
+            std::clamp(adc1AttenuationDb, 0, kMaxStepAttenuationDb));
+        return pkt;
+    }
     // Alex0, bytes 1432-1435: ANT1 (bit 24) in the TX/antenna half, ADC0's
     // receive selection in the low half. A filter replaces bypass: the series
     // bank takes one relay. See this function's declaration comment.

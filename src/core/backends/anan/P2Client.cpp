@@ -433,6 +433,16 @@ void P2Client::setSpeakerAmpMuted(bool on)
 HighPriorityOptions P2Client::highPriorityOptions() const
 {
     HighPriorityOptions opts;
+    if (isLegacyAlexBoardId(m_boardId)) {
+        // brick3-angelia: ANGELIA/ORION. The receive LPF always follows RX1;
+        // the HPF follows it when band filters are on, else it is bypassed.
+        const double hz = m_ddcFreqHz[static_cast<std::size_t>(m_linkDdc)];
+        opts.alexScheme = AlexScheme::LegacyHpfLpf;
+        opts.rxLpfFrequencyHz = hz;
+        opts.adc0Filter = m_bandFiltersEnabled ? legacyAlexHpfFor(hz)
+                                               : AlexRxFilter::Bypass;
+        return opts;
+    }
     opts.muteSpeakerAmp = m_speakerAmpMuted;
     if (m_bandFiltersEnabled) {
         // Both banks follow the link DDC's frequency, as deskHPSDR's do with one
@@ -563,6 +573,12 @@ void P2Client::handleDatagram(std::span<const std::uint8_t> bytes, quint16 sende
         if (const auto reply = parseDiscoveryReply(bytes)) {
             if (!m_discoveryInfoSent) {
                 m_discoveryInfoSent = true;
+                // brick3-angelia: the front-end layout follows the board.
+                if (m_boardId != reply->boardId) {
+                    m_boardId = reply->boardId;
+                    if (m_running && m_socket)
+                        sendRunningHighPriority();
+                }
                 emit discoveryInfoReceived(reply->boardId, reply->firmwareVer,
                                            reply->numDdc);
             }

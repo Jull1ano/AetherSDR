@@ -281,6 +281,9 @@ private:
     // setters. m_ddcFreqHz moves with m_ddcFreqWords: the filter is chosen in
     // hertz, which the phase word cannot give back without the sample clock.
     bool m_bandFiltersEnabled = false;
+    // brick3-angelia: board id from this session's discovery reply (0 until
+    // it arrives). 3/4 select the classic Alex HPF+LPF front end.
+    quint8 m_boardId = 0;
     bool m_speakerAmpMuted = false;
     std::array<double, kMaxDdcs> m_ddcFreqHz{};
 
