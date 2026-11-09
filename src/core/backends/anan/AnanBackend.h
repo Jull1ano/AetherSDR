@@ -15,6 +15,8 @@
 #include <QTimer>
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -69,6 +71,9 @@ public:
     ReceiveDispatch requestSliceAudio(int sliceId, const SliceAudioRequest& request) override;
     // brick3-angelia: ANT1..ANT3 on ANGELIA/ORION boards (Alex0 bits 24-26).
     ReceiveDispatch requestSliceRxAntenna(int sliceId, const QString& antenna) override;
+    // brick3-angelia: host-side Auto AGC-T (the radio has none). The knob
+    // follows the noise floor WDSP's S-meter reads; see autoAgcKnobFor().
+    ReceiveDispatch requestSliceAgcThresholdMode(int sliceId, AgcThresholdMode mode) override;
 
     // The receiver's own audio stage. Without these three the operator's mute,
     // AF fader and balance moved and nothing happened: IRadioBackend's defaults
@@ -173,6 +178,25 @@ public:
     [[nodiscard]] int agcModeForTest() const noexcept { return m_agcMode; }
     [[nodiscard]] double agcMaxGainDbForTest() const noexcept { return agcKnobDb(m_agcThreshold); }
     [[nodiscard]] double agcFixedGainDbForTest() const noexcept { return agcKnobDb(m_agcOffLevel); }
+
+    // Auto AGC-T (brick3-angelia): the knob that puts the band noise at
+    // kAutoAgcNoiseOutDbfs in the audio. WDSP's S-meter and its AGC read the
+    // same samples (RXA.c xrxa: smeter after nbp0, agc after bp1, unity in
+    // between; a -60 dBFS tone meters -60.0), and below the AGC's knee the
+    // output is input plus the maximum gain, so with the noise metering N dB
+    // the gain is kAutoAgcNoiseOutDbfs + 3 - N; the 3 dB is the real audio
+    // against the complex rms. Offline WDSP harness, noise metering -101.4:
+    // 62 dB leaves it at -42 dBFS and S9+ speech at -10..-6 dBFS, while the
+    // AGC's own knee (90 dB there) would hold the noise at -14 dBFS, the
+    // flat, fatiguing sound of an AGC-T set too high.
+    static constexpr double kAutoAgcNoiseOutDbfs = -42.0;
+    static constexpr double kComplexToRealRmsDb = 3.0;
+    [[nodiscard]] static constexpr int autoAgcKnobFor(double noiseFloorDbfs) noexcept
+    {
+        const double maxGainDb = kAutoAgcNoiseOutDbfs + kComplexToRealRmsDb - noiseFloorDbfs;
+        const double knob = (maxGainDb - kAgcKnobMinDb) / kAgcKnobDbPerStep;
+        return std::clamp(static_cast<int>(knob + 0.5), 0, 100);
+    }
     // The live receive state as applyLiveRxState() writes it into the DSP config.
     [[nodiscard]] AnanRxDsp::Config liveRxConfigForTest() const
     {
@@ -265,6 +289,10 @@ private:
     quint64 m_lastSnapshotRxBytes = 0;
     // One WDSP S-meter reading (dBFS) -> dBm, smoothed, published on a tick.
     void onDspMeter(float dbfs);
+    // brick3-angelia: Auto AGC-T. setAgcThresholdAuto() switches the mode
+    // and persists it; applyAutoAgcThreshold() runs on m_autoAgcTimer.
+    void setAgcThresholdAuto(bool on);
+    void applyAutoAgcThreshold();
     // The same smoother Hl2Backend publishes through, so the two receivers'
     // needles move alike by construction -- see WdspSMeter.h.
     SMeterSmoother m_sMeter;
@@ -418,6 +446,21 @@ private:
     int m_agcMode = 3;
     int m_agcThreshold = kDefaultAgcThreshold;
     int m_agcOffLevel = kDefaultAgcOffLevel;
+    // brick3-angelia: Auto AGC-T state. The floor is the S-meter's in-filter
+    // level at the ADC (no attenuation offset: the AGC sees these samples),
+    // falling at once and rising at kNoiseFloorRiseDbPerSec, so speech
+    // pauses set it and a steady carrier only pulls it up slowly. NaN until
+    // the first reading of a session.
+    bool m_agcThresholdAuto = false;
+    double m_noiseFloorDbfs = std::numeric_limits<double>::quiet_NaN();
+    QTimer* m_autoAgcTimer = nullptr;
+    static constexpr int kAutoAgcIntervalMs = 500;
+    static constexpr int kAutoAgcKnobDeadband = 2;        // ~2.8 dB: no chatter
+    static constexpr double kNoiseFloorRiseDbPerSec = 1.0;
+    static constexpr double kMeterReadingsPerSec = 47.0;  // WdspSMeter::emitEveryBlocks
+    // The DDC rate the operator last zoomed to (RestoredRadioState::
+    // sampleRateHz), snapped to kDdc0RatesKsps; 0 = none remembered.
+    int m_restoredRateKsps = 0;
     // Noise blanker as setSliceNoiseBlanker() last stored it. Both
     // connectRadio() and beginRateChange() build the DSP config from it, as
     // they do the AGC above. emitSliceState() also publishes the pair when a

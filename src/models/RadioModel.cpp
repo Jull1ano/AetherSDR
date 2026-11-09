@@ -749,6 +749,8 @@ static void populateFamilyParams(RadioConnectRequest& req, const QString& family
                           anan::AnanSettings::speakerAmpMuted());
         req.params.insert(QStringLiteral("anan.rxAntenna"),
                           anan::AnanSettings::rxAntenna());
+        req.params.insert(QStringLiteral("anan.agcThresholdAuto"),
+                          anan::AnanSettings::agcThresholdAuto());
         return;
     }
 

@@ -207,6 +207,12 @@ AnanBackend::AnanBackend(QObject* parent)
     // Leading+trailing throttle for setSliceFrequency()'s expensive side
     // effects -- see scheduleTuneApply()'s comment. Lives on this object
     // (the GUI thread), same as the backend itself; not moved to m_ioThread.
+    // brick3-angelia: Auto AGC-T re-evaluates the knob twice a second; the
+    // deadband in applyAutoAgcThreshold() keeps it from chattering.
+    m_autoAgcTimer = new QTimer(this);
+    m_autoAgcTimer->setInterval(kAutoAgcIntervalMs);
+    connect(m_autoAgcTimer, &QTimer::timeout, this, &AnanBackend::applyAutoAgcThreshold);
+
     m_tuneThrottleTimer = new QTimer(this);
     m_tuneThrottleTimer->setSingleShot(true);
     connect(m_tuneThrottleTimer, &QTimer::timeout, this, [this] {
@@ -489,6 +495,8 @@ RadioCapabilities AnanBackend::capabilities() const
     c.hasAgcThreshold = true; // Host receiver DSP implements threshold/off gain.
     // agcKnobDb()'s scale, so the AGC-T tooltips show the gain, not the knob.
     c.agcGainScale = RadioCapabilities::AgcGainScale{kAgcKnobMinDb, kAgcKnobDbPerStep};
+    // brick3-angelia: Auto AGC-T runs in this host (requestSliceAgcThresholdMode).
+    c.autoAgcThresholdControl = RadioCapabilities::AutoAgcThresholdControl{};
     c.manufacturer = QStringLiteral("Apache Labs");
     c.model = QString::fromLatin1(anan::ananModelForBoard(m_discoveredBoardId));
     // The session takes its receive front-end options from AnanSettings
@@ -552,8 +560,10 @@ RadioCapabilities AnanBackend::capabilities() const
     c.hasHostNoiseBlanker = true;  // WDSP ANB on the raw IQ, in AnanRxDsp
     c.radioOwnsDbmScale = false;   // client computes it from raw IQ
     c.hasDdcPanEdgeRolloff = true; // see RadioCapabilities.h's own comment
-    c.backendPanAveraging = BackendPanAveraging{kMsPerAverageStep, false, {}, {}}; // AnanPanAnalyzer
-    c.panFrameRateShaping = std::nullopt;  // no client owner is declared for FFT FPS
+    // The client keeps FFT AVG, weighted averaging and FFT FPS per radio, as
+    // for the HL2: nothing on the radio holds them (brick3-angelia).
+    c.backendPanAveraging = BackendPanAveraging{kMsPerAverageStep, true, {}, {}}; // AnanPanAnalyzer
+    c.panFrameRateShaping = PanFrameRateShaping{/*clientPersistsFrameRate*/ true};
     // No protocol field holds a waterfall rate: the client keeps it.
     c.panWaterfallRateShaping =
         PanWaterfallRateShaping{/*clientPersistsWaterfallRate*/ true};
@@ -566,7 +576,10 @@ RadioCapabilities AnanBackend::capabilities() const
     c.clientSettingsDomains = RadioCapabilities::ClientSettingsDomain::RfGain
                               | RadioCapabilities::ClientSettingsDomain::Tuning
                               | RadioCapabilities::ClientSettingsDomain::ReceiveOutputLevel
-                              | RadioCapabilities::ClientSettingsDomain::Agc;
+                              | RadioCapabilities::ClientSettingsDomain::Agc
+                              // The zoomed-to DDC rate, so a session resumes
+                              // at the span the operator left (brick3-angelia).
+                              | RadioCapabilities::ClientSettingsDomain::SpanRate;
     c.hostDroopCalibration = true; // AnanDroopCorrection.h -- real DDC0 roll-off,
                                     // corrected client-side via AnanDroopCalibrator
     c.extensionNamespaces = {QStringLiteral("anan")};  // "frontend.set", "droop.apply" -- see invokeExtension()
@@ -612,6 +625,11 @@ void AnanBackend::applyRestoredState(const RestoredRadioState& state)
         ? state.agcThreshold : kDefaultAgcThreshold;
     const int offLevel = state.agcOffLevels.value(0, -1);
     m_agcOffLevel = offLevel >= 0 && offLevel <= 100 ? offLevel : kDefaultAgcOffLevel;
+    // The span the operator last zoomed to, snapped to a rate the DDC runs.
+    // Unconditional like the rest: a same-family radio swap must not keep
+    // radio A's zoom for radio B.
+    m_restoredRateKsps = state.sampleRateHz > 0
+        ? nearestDdc0RateKsps(state.sampleRateHz / 1000) : 0;
 }
 
 RestoredRadioState AnanBackend::currentOperatingState() const
@@ -625,6 +643,7 @@ RestoredRadioState AnanBackend::currentOperatingState() const
     state.agcMode = agcModeName(m_agcMode);
     state.agcThreshold = m_agcThreshold;
     state.agcOffLevels = {m_agcOffLevel};   // one receiver
+    state.sampleRateHz = m_pendingParams.rx1RateKsps * 1000;   // SpanRate
     state.extensionSchemaVersion = 1;
     state.extension = QJsonObject{{QStringLiteral("rfGain"), QJsonObject{
         {QStringLiteral("adc0AttenuationDb"), m_pendingParams.adc0AttenuationDb},
@@ -690,8 +709,12 @@ void AnanBackend::connectRadio(const RadioConnectRequest& request)
     }
 
     m_pendingParams.host = request.host;
-    m_pendingParams.rx1RateKsps =
+    // The remembered zoom (applyRestoredState) beats the ANAN Front End page's
+    // rate, in the order Hl2Backend gives Hl2Settings::spanMhz() and its own
+    // restored rate: the page is where a radio with no memory yet starts.
+    const int setupRateKsps =
         request.params.value(QStringLiteral("anan.ddc0RateKsps"), 48).toInt();
+    m_pendingParams.rx1RateKsps = m_restoredRateKsps > 0 ? m_restoredRateKsps : setupRateKsps;
     // Connect-time-only ADC options -- see P2Client::Params' own comment
     // for why none of these have a live setter. Defaults match
     // AnanSettings' own defaults, so a caller that never populated these
@@ -725,6 +748,15 @@ void AnanBackend::connectRadio(const RadioConnectRequest& request)
     // brick3-angelia: ANT1..ANT3, applied only on ANGELIA/ORION boards.
     m_pendingParams.rxAntenna = std::clamp(
         request.params.value(QStringLiteral("anan.rxAntenna"), 0).toInt(), 0, 2);
+    // brick3-angelia: Auto AGC-T as the operator left it. The floor is
+    // re-acquired from this session's own readings.
+    m_agcThresholdAuto =
+        request.params.value(QStringLiteral("anan.agcThresholdAuto"), false).toBool();
+    m_noiseFloorDbfs = std::numeric_limits<double>::quiet_NaN();
+    if (m_agcThresholdAuto)
+        m_autoAgcTimer->start();
+    else
+        m_autoAgcTimer->stop();
     // applyRestoredState() seeds both ADC values before this connect.
     m_attenuationDb = m_pendingParams.rx1AdcIndex == 1
         ? m_pendingParams.adc1AttenuationDb
@@ -1032,6 +1064,12 @@ void AnanBackend::setSliceAgc(int sliceId, const QString& mode, int thresholdDb)
 void AnanBackend::requestSliceAgc(int sliceId, const SliceAgcRequest& request)
 {
     if (request.field != SliceAgcRequest::Field::OffLevel) {
+        // The operator's own AGC-T hands Auto AGC-T back to manual, as a
+        // Flex does when its slider moves (brick3-angelia).
+        if (request.field == SliceAgcRequest::Field::Threshold
+            && request.origin == SliceAgcRequest::Origin::Operator && m_agcThresholdAuto) {
+            setAgcThresholdAuto(false);
+        }
         IRadioBackend::requestSliceAgc(sliceId, request);
         return;
     }
@@ -1117,6 +1155,49 @@ ReceiveDispatch AnanBackend::requestSliceRxAntenna(int sliceId, const QString& a
     return ReceiveDispatch::Dispatched;
 }
 
+ReceiveDispatch AnanBackend::requestSliceAgcThresholdMode(int sliceId, AgcThresholdMode mode)
+{
+    if (sliceId != kSliceId
+        || (mode != AgcThresholdMode::Manual && mode != AgcThresholdMode::Automatic)) {
+        return ReceiveDispatch::Unsupported;
+    }
+    setAgcThresholdAuto(mode == AgcThresholdMode::Automatic);
+    return ReceiveDispatch::Dispatched;
+}
+
+void AnanBackend::setAgcThresholdAuto(bool on)
+{
+    if (m_agcThresholdAuto != on) {
+        m_agcThresholdAuto = on;
+        AnanSettings::setAgcThresholdAuto(on);
+        if (on) {
+            // Re-acquire from fresh readings: the follower may have been
+            // sitting on a floor from another band while manual.
+            m_noiseFloorDbfs = std::numeric_limits<double>::quiet_NaN();
+            m_autoAgcTimer->start();
+        } else {
+            m_autoAgcTimer->stop();
+        }
+    }
+    emitSliceState();   // the confirmed mode clears the slice's pending flag
+}
+
+void AnanBackend::applyAutoAgcThreshold()
+{
+    if (!m_agcThresholdAuto || !m_connected || !std::isfinite(m_noiseFloorDbfs))
+        return;
+    const int knob = autoAgcKnobFor(m_noiseFloorDbfs);
+    if (std::abs(knob - m_agcThreshold) < kAutoAgcKnobDeadband)
+        return;
+    m_agcThreshold = knob;
+    if (m_dsp) {
+        QMetaObject::invokeMethod(m_dsp, "setAgc", Qt::QueuedConnection,
+            Q_ARG(int, m_agcMode), Q_ARG(double, agcKnobDb(m_agcThreshold)));
+    }
+    emitSliceState();                 // the slider follows the knob
+    emit operatingStateChanged();     // Agc capture
+}
+
 void AnanBackend::setSliceAudioMute(int sliceId, bool mute)
 {
     Q_UNUSED(sliceId);   // one slice in this phase
@@ -1178,7 +1259,17 @@ void AnanBackend::setPanCenter(const QString& panId, double hz, PanCenterIntent 
 {
     Q_UNUSED(panId);   // one pan in this phase
     Q_UNUSED(intent);  // ignored, matching Hl2Backend::setPanCenter
-    setSliceFrequency(kSliceId, hz);
+    // The NCO is the slice, so a pan centre is a retune -- applied from the
+    // event loop, not here. RadioModel::requestPanDisplay() holds a fence
+    // across this call, and the sliceChanged a retune publishes at once lets
+    // the GUI's slice-follow re-enter requestPanCenter(), which trips that
+    // fence: every pan drag and Ctrl+wheel zoom was reported refused after
+    // the radio had already moved (brick3-angelia). Hl2Backend never meets
+    // this: its pan centre moves the NCO under a fixed slice frequency.
+    if (!std::isfinite(hz) || hz == m_sliceFreqHz)
+        return;   // nothing to move; also ends the slice-follow echo
+    QMetaObject::invokeMethod(this, [this, hz] { setSliceFrequency(kSliceId, hz); },
+                              Qt::QueuedConnection);
 }
 
 int AnanBackend::nearestDdc0RateKsps(int requestedKsps) noexcept
@@ -1356,6 +1447,7 @@ void AnanBackend::finishRateChange(quint64 generation, bool ok, const QString& e
                                   Q_ARG(bool, false));
         m_rateChanging = false;
         emitPanState();
+        emit operatingStateChanged();   // SpanRate capture: the zoom landed
         // A zoom the operator kept turning while this ran: apply the latest
         // request now rather than stranding the display a step behind.
         retryPendingRateChange();
@@ -1725,6 +1817,18 @@ void AnanBackend::onLinkCounters(const P2Client::LinkCounters& counters)
 
 void AnanBackend::onDspMeter(float dbfs)
 {
+    // Auto AGC-T's noise floor (brick3-angelia): WDSP's meter sits where the
+    // AGC does (RXA.c xrxa: smeter after nbp0, agc after bp1), so its level
+    // is what the knob law needs, before the attenuation offset below. Falls
+    // at once, rises at kNoiseFloorRiseDbPerSec.
+    if (std::isfinite(dbfs)) {
+        if (!std::isfinite(m_noiseFloorDbfs) || dbfs < m_noiseFloorDbfs) {
+            m_noiseFloorDbfs = dbfs;
+        } else {
+            m_noiseFloorDbfs += std::min(static_cast<double>(dbfs) - m_noiseFloorDbfs,
+                                         kNoiseFloorRiseDbPerSec / kMeterReadingsPerSec);
+        }
+    }
     const double dbm = static_cast<double>(dbfs) + kSMeterDbmOffset + m_attenuationDb;
     // Smooth EVERY reading, publish only on the tick -- the same smoother,
     // and the same reasons, as Hl2Backend's receive meter (SMeterSmoother).
@@ -1791,6 +1895,10 @@ void AnanBackend::emitSliceState()
     d.agcMode = agcModeName(m_agcMode);
     d.agcThreshold = m_agcThreshold;
     d.agcOffLevel = m_agcOffLevel;
+    // brick3-angelia: Auto AGC-T is this host's, so its mode is always
+    // known; the slice's "A" button needs an observation to be offered.
+    d.agcThresholdMode = m_agcThresholdAuto ? AgcThresholdMode::Automatic
+                                            : AgcThresholdMode::Manual;
     // The audio stage as APPLIED. Both are required, not cosmetic: the receive
     // control gate refuses an operation whose observation is absent, so without
     // these two the mute and the fader are offered and then rejected.

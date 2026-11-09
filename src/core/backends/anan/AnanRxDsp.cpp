@@ -106,6 +106,11 @@ AnanRxDsp::RebuildResult AnanRxDsp::buildChannel(const Config& config)
     wc.noiseBlanker = config.noiseBlanker;
     wc.noiseBlankerLevel = config.noiseBlankerLevel;
     wc.noiseBlankerFill = config.noiseBlankerFill;
+    // Unity, as Hl2RxDsp::kRxPanelGain: WDSP's RXA panel defaults to x4
+    // (RXA.c create_panel, gain1 4.0), +12 dB past the AGC's own level. Left
+    // at that default, band noise alone peaked at +8 dBFS on a Brick3 and
+    // every speech peak clipped (offline WDSP harness, brick3-angelia).
+    wc.rxPanelGain = 1.0;
     // filterTaps left at WdspChannel::Config's own default (2048): this
     // phase has no manual notch filter, so there is no narrow-notch floor to
     // widen it for (contrast Hl2RxDsp::kRxFilterTaps, which exists solely

@@ -69,6 +69,11 @@ public:
     static int rxAntenna();
     static void setRxAntenna(int index);
 
+    // brick3-angelia: Auto AGC-T, the AGC threshold following the in-filter
+    // noise floor the host measures (AnanBackend). Off by default.
+    static bool agcThresholdAuto();
+    static void setAgcThresholdAuto(bool on);
+
     // The DDC0 rates a session may start at, for a UI offering the choice.
     //
     // Here rather than read from the protocol header directly, because a setup

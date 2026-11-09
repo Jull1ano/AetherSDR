@@ -28,6 +28,7 @@ constexpr const char* kFieldBypassAdc1Filters = "bypassAdc1Filters";
 constexpr const char* kFieldBandFilters       = "bandFilters";
 constexpr const char* kFieldSpeakerAmpMuted   = "speakerAmpMuted";
 constexpr const char* kFieldRxAntenna         = "rxAntenna";   // brick3-angelia
+constexpr const char* kFieldAgcThresholdAuto  = "agcThresholdAuto";   // brick3-angelia
 
 }  // namespace
 
@@ -177,6 +178,18 @@ void AnanSettings::setRxAntenna(int index)
 {
     QJsonObject obj = readObj();
     obj[QLatin1String(kFieldRxAntenna)] = (index >= 0 && index <= 2) ? index : 0;
+    writeObj(obj);
+}
+
+bool AnanSettings::agcThresholdAuto()
+{
+    return readObj().value(QLatin1String(kFieldAgcThresholdAuto)).toBool(false);
+}
+
+void AnanSettings::setAgcThresholdAuto(bool on)
+{
+    QJsonObject obj = readObj();
+    obj[QLatin1String(kFieldAgcThresholdAuto)] = on;
     writeObj(obj);
 }
 

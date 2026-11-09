@@ -215,19 +215,31 @@ int main(int argc, char** argv)
         check(c.hasDdcPanEdgeRolloff,
               "hasDdcPanEdgeRolloff true -- ANAN's DDC has a real edge roll-off");
         check(c.backendPanAveraging.has_value()
-                  && !c.backendPanAveraging->clientPersistsAveraging
+                  && c.backendPanAveraging->clientPersistsAveraging
                   && c.backendPanAveraging->averageDescription.isEmpty()
                   && c.backendPanAveraging->weightedDescription.isEmpty()
                   && c.backendPanAveraging->msPerAverageStep == 10,
-              "backendPanAveraging engaged, 10 ms per FFT AVG step -- the WDSP analyzer averages");
+              "backendPanAveraging engaged, 10 ms per FFT AVG step, the client keeps the "
+              "setting -- the WDSP analyzer averages, nothing on the radio remembers");
+        check(c.panFrameRateShaping && c.panFrameRateShaping->clientPersistsFrameRate,
+              "FFT FPS is the client's to keep, as on the HL2 (brick3-angelia)");
+        check(c.autoAgcThresholdControl.has_value(),
+              "Auto AGC-T is offered: this host tracks the noise floor (brick3-angelia)");
+        check(AnanBackend::autoAgcKnobFor(-101.0) == 59
+                  && AnanBackend::autoAgcKnobFor(-200.0) == 100
+                  && AnanBackend::autoAgcKnobFor(0.0) == 0,
+              "autoAgcKnobFor: noise at -42 dBFS from a -101 dB floor is knob 59 (62 dB), clamped at the ends");
+        check(backend.currentOperatingState().sampleRateHz == 48000,
+              "the DDC rate is captured for SpanRate (48 ksps before any zoom)");
         check(c.tuningMinHz == 0.0 && c.tuningMaxHz == 0.0,
               "tuning range not reported -- no verified G2 range yet, not a guess");
         check(c.clientSettingsDomains
                   == (RadioCapabilities::ClientSettingsDomain::RfGain
                       | RadioCapabilities::ClientSettingsDomain::Tuning
                       | RadioCapabilities::ClientSettingsDomain::ReceiveOutputLevel
-                      | RadioCapabilities::ClientSettingsDomain::Agc),
-              "RF gain, tuning, radio output level AND AGC restore are declared -- "
+                      | RadioCapabilities::ClientSettingsDomain::Agc
+                      | RadioCapabilities::ClientSettingsDomain::SpanRate),
+              "RF gain, tuning, radio output level, AGC AND span rate restore are declared -- "
               "this radio reports none of them, so the client is its only memory");
         bool scaleMatches = c.agcGainScale.has_value();
         for (const int knob : {0, 71, 100}) {
