@@ -251,12 +251,19 @@ std::array<std::uint8_t, 1444> buildHighPriority(bool run,
     for (std::size_t n = 0; n < count; ++n)
         writeU32be(&pkt[9 + 4 * n], ddcFreqWords[n]);
     if (opts.alexScheme == AlexScheme::LegacyHpfLpf) {
-        // brick3-angelia: ANGELIA/ORION Alex0 = ANT1 (bit 24), ADC0's high-pass
+        // brick3-angelia: ANGELIA/ORION Alex0 = ANT1-3 (bits 24-26), ADC0's high-pass
         // selection, and the low-pass filter the receive path runs through
         // (deskHPSDR new_protocol.c default case). A bypassed HPF takes the
         // widest LPF so nothing is band-limited. No ADC1 bank and no speaker
         // amplifier mute bit on these boards. Receive only: no T/R relay.
-        std::uint32_t alex0 = std::uint32_t{1} << 24;
+        if (opts.filterTuneWord != 0) {
+            if (count == 0 || ddcFreqWords[0] == 0)
+                writeU32be(&pkt[9], opts.filterTuneWord);    // DDC0
+            writeU32be(&pkt[329], opts.filterTuneWord);      // DUC0
+        }
+        const int ant = (opts.antennaIndex >= 0 && opts.antennaIndex <= 2)
+            ? opts.antennaIndex : 0;
+        std::uint32_t alex0 = std::uint32_t{1} << (24 + ant);
         bool bypassed = false;
         if (opts.adc0Filter) {
             alex0 |= alexRxFilterBits(*opts.adc0Filter);

@@ -3,6 +3,7 @@
 #include "core/backends/anan/AnanDroopCalibrator.h"
 #include "core/backends/anan/AnanDroopDefaults.h"
 #include "core/backends/anan/AnanReceiverRoutes.h"
+#include "core/backends/anan/AnanSettings.h"
 #include "core/backends/WdspNoiseBlanker.h"
 #include "core/AppSettings.h"
 #include "core/RadioSettingsScope.h"
@@ -357,6 +358,10 @@ AnanBackend::AnanBackend(QObject* parent)
                    "the panadapter edges look wrong";
         }
         emit capabilitiesChanged();
+        // brick3-angelia: the antenna list depends on the board id, which can
+        // land after linkUp() already published the slice.
+        if (m_connected)
+            emitSliceState();
     });
 
     connect(m_dsp, &AnanRxDsp::pcmReady, this, [this](const PcmFrame& frame) {
@@ -717,6 +722,9 @@ void AnanBackend::connectRadio(const RadioConnectRequest& request)
         request.params.value(QStringLiteral("anan.bandFiltersEnabled"), false).toBool();
     m_pendingParams.speakerAmpMuted =
         request.params.value(QStringLiteral("anan.speakerAmpMuted"), false).toBool();
+    // brick3-angelia: ANT1..ANT3, applied only on ANGELIA/ORION boards.
+    m_pendingParams.rxAntenna = std::clamp(
+        request.params.value(QStringLiteral("anan.rxAntenna"), 0).toInt(), 0, 2);
     // applyRestoredState() seeds both ADC values before this connect.
     m_attenuationDb = m_pendingParams.rx1AdcIndex == 1
         ? m_pendingParams.adc1AttenuationDb
@@ -1081,6 +1089,31 @@ ReceiveDispatch AnanBackend::requestSliceAudio(int sliceId, const SliceAudioRequ
     case SliceAudioRequest::Field::Mute: setSliceAudioMute(sliceId, request.value != 0); break;
     case SliceAudioRequest::Field::Pan: setSliceAudioPan(sliceId, request.value); break;
     }
+    return ReceiveDispatch::Dispatched;
+}
+
+ReceiveDispatch AnanBackend::requestSliceRxAntenna(int sliceId, const QString& antenna)
+{
+    // brick3-angelia: only the classic Alex boards get a choice; the G2 path
+    // stays on ANT1 as upstream ships it.
+    if (sliceId != kSliceId || !isLegacyAlexBoardId(m_discoveredBoardId))
+        return ReceiveDispatch::Unsupported;
+    int index = -1;
+    if (antenna.compare(QLatin1String("ANT1"), Qt::CaseInsensitive) == 0)
+        index = 0;
+    else if (antenna.compare(QLatin1String("ANT2"), Qt::CaseInsensitive) == 0)
+        index = 1;
+    else if (antenna.compare(QLatin1String("ANT3"), Qt::CaseInsensitive) == 0)
+        index = 2;
+    if (index < 0)
+        return ReceiveDispatch::Unsupported;
+    m_pendingParams.rxAntenna = index;
+    AnanSettings::setRxAntenna(index);
+    if (m_client) {
+        QMetaObject::invokeMethod(m_client, "setRxAntenna", Qt::QueuedConnection,
+                                  Q_ARG(int, index));
+    }
+    emitSliceState();
     return ReceiveDispatch::Dispatched;
 }
 
@@ -1776,6 +1809,12 @@ void AnanBackend::emitSliceState()
     // panId equality. Hl2Backend::emitSliceState() sets this every time for
     // the same reason.
     d.panId = kPanId;
+    // brick3-angelia: the classic Alex boards switch ANT1..ANT3 for receive.
+    if (isLegacyAlexBoardId(m_discoveredBoardId)) {
+        d.rxAntennaList = QStringList{QStringLiteral("ANT1"), QStringLiteral("ANT2"),
+                                      QStringLiteral("ANT3")};
+        d.rxAntenna = QStringLiteral("ANT%1").arg(m_pendingParams.rxAntenna + 1);
+    }
     emit sliceChanged(kSliceId, d);
 }
 

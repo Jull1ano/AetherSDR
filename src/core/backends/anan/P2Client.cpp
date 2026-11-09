@@ -111,6 +111,7 @@ bool P2Client::start(const Params& params, int connectTimeoutMs)
     m_speakerAudioEnabled = params.speakerAudioEnabled;
     m_bandFiltersEnabled = params.bandFiltersEnabled;
     m_speakerAmpMuted = params.speakerAmpMuted;
+    m_rxAntenna = (params.rxAntenna >= 0 && params.rxAntenna <= 2) ? params.rxAntenna : 0;
     m_ddcFreqHz.fill(0.0);   // cleared with m_ddcFreqWords: nothing is tuned yet
     m_speakerPending.clear();
     m_speakerPacer.reset();
@@ -430,6 +431,14 @@ void P2Client::setSpeakerAmpMuted(bool on)
     }
 }
 
+void P2Client::setRxAntenna(int index)
+{
+    m_rxAntenna = (index >= 0 && index <= 2) ? index : 0;
+    if (m_running && m_socket) {
+        sendRunningHighPriority();
+    }
+}
+
 HighPriorityOptions P2Client::highPriorityOptions() const
 {
     HighPriorityOptions opts;
@@ -441,6 +450,9 @@ HighPriorityOptions P2Client::highPriorityOptions() const
         opts.rxLpfFrequencyHz = hz;
         opts.adc0Filter = m_bandFiltersEnabled ? legacyAlexHpfFor(hz)
                                                : AlexRxFilter::Bypass;
+        opts.antennaIndex = m_rxAntenna;
+        // The Brick3 picks its band filters from DDC0/1, not from Alex0.
+        opts.filterTuneWord = m_ddcFreqWords[static_cast<std::size_t>(m_linkDdc)];
         return opts;
     }
     opts.muteSpeakerAmp = m_speakerAmpMuted;

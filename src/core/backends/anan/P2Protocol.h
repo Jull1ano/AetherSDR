@@ -271,6 +271,15 @@ struct HighPriorityOptions {
     // the receive low-pass filter follows.
     AlexScheme alexScheme = AlexScheme::SaturnBandPass;
     double rxLpfFrequencyHz = 0.0;
+    // brick3-angelia, LegacyHpfLpf only. Alex0 antenna: 0..2 = ANT1..ANT3
+    // (bits 24-26); anything else is ANT1.
+    int antennaIndex = 0;
+    // brick3-angelia, LegacyHpfLpf only. RX1's phase word, also written to
+    // DDC0 (when the caller left it zero) and to the DUC word (bytes 329-332).
+    // The Brick3 switches its band filters from the DDC0/1 frequencies
+    // (deskHPSDR new_protocol.c), so a receiver on DDC2 alone hears nothing.
+    // Inert for transmit: no PTT bit is ever set. 0 = write neither.
+    std::uint32_t filterTuneWord = 0;
 };
 
 // 1444-byte High Priority packet. RX-ONLY: `run` sets byte 4 bit[0] only and

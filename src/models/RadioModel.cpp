@@ -747,6 +747,8 @@ static void populateFamilyParams(RadioConnectRequest& req, const QString& family
                           anan::AnanSettings::bandFiltersEnabled());
         req.params.insert(QStringLiteral("anan.speakerAmpMuted"),
                           anan::AnanSettings::speakerAmpMuted());
+        req.params.insert(QStringLiteral("anan.rxAntenna"),
+                          anan::AnanSettings::rxAntenna());
         return;
     }
 

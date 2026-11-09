@@ -64,6 +64,11 @@ public:
     static bool speakerAmpMuted();
     static void setSpeakerAmpMuted(bool on);
 
+    // brick3-angelia: receive antenna on ANGELIA/ORION boards, 0..2 =
+    // ANT1..ANT3. Default ANT1.
+    static int rxAntenna();
+    static void setRxAntenna(int index);
+
     // The DDC0 rates a session may start at, for a UI offering the choice.
     //
     // Here rather than read from the protocol header directly, because a setup

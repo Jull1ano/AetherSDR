@@ -71,6 +71,9 @@ public:
         bool bandFiltersEnabled = false;
         // Mute the radio's speaker amplifier (byte 1400 bit 1).
         bool speakerAmpMuted = false;
+        // brick3-angelia: receive antenna on ANGELIA/ORION, 0..2 = ANT1..ANT3.
+        // Live via setRxAntenna(). Ignored on other boards (ANT1).
+        int rxAntenna = 0;
 
         // Multi-DDC session. EMPTY (default) = RX1 alone on its routed DDC
         // (kRx1Route), built from rx1RateKsps/rx1AdcIndex. Non-empty is
@@ -112,6 +115,10 @@ public:
 
     // Mute or unmute the radio's speaker amplifier. Same cadence contract.
     Q_INVOKABLE void setSpeakerAmpMuted(bool on);
+
+    // brick3-angelia: receive antenna, 0..2 = ANT1..ANT3 (out of range = ANT1).
+    // Applies on ANGELIA/ORION boards only. Same cadence contract.
+    Q_INVOKABLE void setRxAntenna(int index);
 
     // Hand over demodulated receiver audio for the radio's speaker: L,R,... int16 in
     // HOST order at kSpeakerSampleRateHz (buildSpeakerAudio() byte-swaps). One call
@@ -284,6 +291,7 @@ private:
     // brick3-angelia: board id from this session's discovery reply (0 until
     // it arrives). 3/4 select the classic Alex HPF+LPF front end.
     quint8 m_boardId = 0;
+    int m_rxAntenna = 0;   // brick3-angelia: 0..2 = ANT1..ANT3
     bool m_speakerAmpMuted = false;
     std::array<double, kMaxDdcs> m_ddcFreqHz{};
 

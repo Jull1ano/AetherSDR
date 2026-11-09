@@ -341,6 +341,50 @@ int main()
         const std::array<std::uint32_t, 1> oneWord{word};
         check(buildHighPriority(true, oneWord, true, true, 0, 0, opts0) == hp0,
               "the multi-DDC overload carries the options identically");
+
+        // brick3-angelia: classic Alex boards. RX1 runs on DDC2; the Brick3
+        // switches its band filters from DDC0/1, so DDC0 and the DUC carry
+        // RX1's word too, and PTT stays clear.
+        const std::uint32_t rx1 = phaseWord(14'225'000.0);
+        const std::array<std::uint32_t, 4> legacyWords{0, 0, rx1, 0};
+        HighPriorityOptions legacy;
+        legacy.alexScheme = AlexScheme::LegacyHpfLpf;
+        legacy.rxLpfFrequencyHz = 14'225'000.0;
+        legacy.adc0Filter = AlexRxFilter::Bypass;
+        legacy.filterTuneWord = rx1;
+        const auto hpL = buildHighPriority(true, legacyWords, true, true, 0, 0, legacy);
+        check(readU32(hpL, 9) == rx1, "legacy: DDC0 carries RX1's word for the Brick3 filters");
+        check(readU32(hpL, 13) == 0, "legacy: DDC1 stays zero with one receiver (as deskHPSDR)");
+        check(readU32(hpL, 17) == rx1, "legacy: DDC2 keeps RX1's own word");
+        check(readU32(hpL, 329) == rx1, "legacy: the DUC word follows RX1");
+        check((hpL[4] & 0x1E) == 0, "legacy: PTT bits stay clear");
+        check(readU32(hpL, 1432) == ((std::uint32_t{1} << 24) | (std::uint32_t{1} << 12)
+                                     | (std::uint32_t{1} << 29)),
+              "legacy bypass: ANT1 + HPF bypass + 6 m/bypass LPF");
+        const std::array<std::uint32_t, 4> ownDdc0{phaseWord(7'100'000.0), 0, rx1, 0};
+        check(readU32(buildHighPriority(true, ownDdc0, true, true, 0, 0, legacy), 9)
+                  == phaseWord(7'100'000.0),
+              "legacy: a DDC0 the caller tuned keeps its own word");
+        HighPriorityOptions legacyAnt2 = legacy;
+        legacyAnt2.antennaIndex = 1;
+        const std::uint32_t ant2 =
+            readU32(buildHighPriority(true, legacyWords, true, true, 0, 0, legacyAnt2), 1432);
+        check((ant2 & 0x07000000u) == 0x02000000u, "legacy: antennaIndex 1 selects ANT2 alone");
+        HighPriorityOptions legacyAnt3 = legacy;
+        legacyAnt3.antennaIndex = 2;
+        const std::uint32_t ant3 =
+            readU32(buildHighPriority(true, legacyWords, true, true, 0, 0, legacyAnt3), 1432);
+        check((ant3 & 0x07000000u) == 0x04000000u, "legacy: antennaIndex 2 selects ANT3 alone");
+        HighPriorityOptions legacyBadAnt = legacy;
+        legacyBadAnt.antennaIndex = 7;
+        const std::uint32_t antBad =
+            readU32(buildHighPriority(true, legacyWords, true, true, 0, 0, legacyBadAnt), 1432);
+        check((antBad & 0x07000000u) == 0x01000000u, "legacy: an out-of-range antenna is ANT1");
+        HighPriorityOptions legacyNoTune = legacy;
+        legacyNoTune.filterTuneWord = 0;
+        const auto hpNoTune = buildHighPriority(true, legacyWords, true, true, 0, 0, legacyNoTune);
+        check(readU32(hpNoTune, 9) == 0 && readU32(hpNoTune, 329) == 0,
+              "legacy: an untuned receiver writes neither DDC0 nor the DUC");
     }
 
     // ---- Multi-DDC encode (DDC-Specific rows at 17+6n, HP words at 9+4n) ----

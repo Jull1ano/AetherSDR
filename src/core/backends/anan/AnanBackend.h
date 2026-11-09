@@ -67,6 +67,8 @@ public:
                               int level, AetherSDR::NoiseBlankerFill fill) override;
     ReceiveDispatch requestSliceDsp(int sliceId, const SliceDspRequest& request) override;
     ReceiveDispatch requestSliceAudio(int sliceId, const SliceAudioRequest& request) override;
+    // brick3-angelia: ANT1..ANT3 on ANGELIA/ORION boards (Alex0 bits 24-26).
+    ReceiveDispatch requestSliceRxAntenna(int sliceId, const QString& antenna) override;
 
     // The receiver's own audio stage. Without these three the operator's mute,
     // AF fader and balance moved and nothing happened: IRadioBackend's defaults
