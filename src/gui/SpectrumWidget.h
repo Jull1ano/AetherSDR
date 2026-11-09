@@ -715,7 +715,7 @@ public:
     void setFreqGridSpacing(int khz);
     void setFreqScaleFontPt(int pt);
     void setFftLineWidth(float w);
-    void setFftSmoothing(int halfWidthPx);
+    void setFftSmoothing(int sigmaTenthsPx);
     void setFftDecombHz(int hz);       // 0 = off
     float fftFillAlpha() const         { return m_fftFillAlpha; }
     QColor fftFillColor() const        { return m_fftFillColor; }
@@ -1798,7 +1798,7 @@ private:
     int  m_freqGridSpacingKhz{0};   // 0=Auto, or 1/2/5/10/25/50/100 kHz (#1390)
     int  m_freqScaleFontPt{8};      // freq-scale label size, 8..14 pt (#3501)
     float m_fftLineWidth{1.0f};     // spectrum trace width in pixels (RFC #5561)
-    int   m_fftSmoothing{0};        // FFT Smooth half-width, logical px (0 = off)
+    int   m_fftSmoothing{0};        // FFT Smooth Gaussian sigma, tenths of a logical px (0 = off)
     int   m_fftDecombHz{0};         // FFT De-comb width, Hz (0 = off)
 
     // ── Waterfall display controls (radio-side via "display panafall set") ─

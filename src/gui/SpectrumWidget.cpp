@@ -2910,8 +2910,16 @@ void SpectrumWidget::loadFftTraceShaping()
         return;
     }
     const QJsonObject obj = doc.object();
-    m_fftSmoothing = std::clamp(obj.value(QStringLiteral("smoothPx")).toInt(0),
-                                0, AetherSDR::kFftSmoothingMaxHalfWidthPx);
+    // Version 2 stores a Gaussian sigma in tenths of a pixel; version 1's
+    // box half-width converts to the sigma with its spread.
+    if (obj.contains(QStringLiteral("smoothSigmaTenthsPx"))) {
+        m_fftSmoothing = std::clamp(obj.value(QStringLiteral("smoothSigmaTenthsPx")).toInt(0),
+                                    0, AetherSDR::kFftSmoothingMaxSteps);
+    } else {
+        m_fftSmoothing = AetherSDR::fftSmoothingStepsFromHalfWidth(std::clamp(
+            obj.value(QStringLiteral("smoothPx")).toInt(0),
+            0, AetherSDR::kFftSmoothingMaxHalfWidthPx));
+    }
     m_fftDecombHz = std::clamp(obj.value(QStringLiteral("decombHz")).toInt(0),
                                0, AetherSDR::kFftDecombMaxHz);
 }
@@ -2919,8 +2927,8 @@ void SpectrumWidget::loadFftTraceShaping()
 void SpectrumWidget::saveFftTraceShaping()
 {
     QJsonObject obj;
-    obj.insert(QStringLiteral("version"), 1);
-    obj.insert(QStringLiteral("smoothPx"), m_fftSmoothing);
+    obj.insert(QStringLiteral("version"), 2);
+    obj.insert(QStringLiteral("smoothSigmaTenthsPx"), m_fftSmoothing);
     obj.insert(QStringLiteral("decombHz"), m_fftDecombHz);
 
     // One setValue + save for the whole object (Principle XIV).
@@ -4501,8 +4509,8 @@ void SpectrumWidget::setFftLineWidth(float w) {
     s.save();
     update();
 }
-void SpectrumWidget::setFftSmoothing(int halfWidthPx) {
-    const int clamped = std::clamp(halfWidthPx, 0, AetherSDR::kFftSmoothingMaxHalfWidthPx);
+void SpectrumWidget::setFftSmoothing(int sigmaTenthsPx) {
+    const int clamped = std::clamp(sigmaTenthsPx, 0, AetherSDR::kFftSmoothingMaxSteps);
     if (clamped == m_fftSmoothing) {
         return;
     }
@@ -9474,9 +9482,11 @@ void SpectrumWidget::shapeFftTrace(std::span<float> bins, double hzPerBin,
         AetherSDR::decombTrace(bins, windowPoints, *m_fftDecombEnvelope, *m_fftDecombScratch);
     }
     if (m_fftSmoothing > 0) {
-        const int halfPoints = static_cast<int>(
-            std::lround(static_cast<double>(m_fftSmoothing) * hzPerPx / hzPerBin));
-        AetherSDR::smoothFftTraceLinearPower(bins, bins, halfPoints, m_fftSmoothLinearScratch);
+        // m_fftSmoothing is a Gaussian sigma in tenths of a pixel.
+        const double sigmaPoints = static_cast<double>(m_fftSmoothing)
+            / AetherSDR::kFftSmoothingStepsPerPx * hzPerPx / hzPerBin;
+        AetherSDR::smoothFftTraceGaussianLinearPower(bins, bins, sigmaPoints,
+                                                     m_fftSmoothLinearScratch);
     }
 }
 

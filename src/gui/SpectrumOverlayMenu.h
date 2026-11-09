@@ -254,7 +254,7 @@ signals:
     void freqGridSpacingChanged(int khz);
     void freqScaleFontPtChanged(int pt);
     void fftLineWidthChanged(float width);
-    void fftSmoothingChanged(int halfWidthPx);
+    void fftSmoothingChanged(int sigmaTenthsPx);
     void fftDecombHzChanged(int hz);
     void wfColorGainChanged(int gain);
     void wfBlackLevelChanged(int level);

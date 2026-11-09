@@ -92,6 +92,15 @@ static QString offOrValueText(int value)
     return value == 0 ? SpectrumOverlayMenu::tr("Off") : QString::number(value);
 }
 
+// FFT Smooth's label: the slider counts tenths of a pixel, shown as pixels.
+static QString smoothingText(int sigmaTenthsPx)
+{
+    return sigmaTenthsPx == 0
+        ? SpectrumOverlayMenu::tr("Off")
+        : QString::number(static_cast<double>(sigmaTenthsPx)
+                              / AetherSDR::kFftSmoothingStepsPerPx, 'f', 1);
+}
+
 static QString rateSliderLabelText(int sliderValue)
 {
     return QString::number(sliderValue);
@@ -1945,23 +1954,26 @@ void SpectrumOverlayMenu::buildDisplayPanel()
 
     // Smooth — display-only smoothing across frequency, in linear power (the
     // panadapter's counterpart of the AetherRX/TX EQ's Smoothing). The value
-    // is the half-width in pixels; the client applies it to every radio.
-    makeRow("FFT Smooth:", 0, AetherSDR::kFftSmoothingMaxHalfWidthPx, 0,
+    // is a Gaussian width in tenths of a pixel; the client applies it to every
+    // radio.
+    makeRow("FFT Smooth:", 0, AetherSDR::kFftSmoothingMaxSteps, 0,
             m_smoothSlider, m_smoothLabel);
     m_smoothSlider->setObjectName("displayFftSmoothSlider");
+    m_smoothSlider->setPageStep(5);
     m_smoothSlider->setAccessibleName(tr("FFT smoothing"));
     m_smoothSlider->setToolTip(
-        tr("Smooths the spectrum trace across frequency, averaging each point "
-           "with its neighbors up to this many pixels either side.\n"
+        tr("Smooths the spectrum trace across frequency with a Gaussian this "
+           "many pixels wide (0.1 px steps): 0.2-0.6 calms the grass and keeps "
+           "detail, larger values give a soft outline.\n"
            "Averages in linear power, so the floor reads its true average "
            "power, about 1-1.5 dB above the unsmoothed trace's middle. "
            "Waterfall and noise-floor readings are not affected. 0 = off."));
     m_smoothSlider->setAccessibleDescription(
-        tr("Averages the spectrum trace across this many pixels either side. "
-           "Zero is off. The waterfall is not affected."));
-    m_smoothLabel->setText(offOrValueText(0));
+        tr("Smooths the spectrum trace with a Gaussian this many pixels wide, "
+           "in tenths of a pixel. Zero is off. The waterfall is not affected."));
+    m_smoothLabel->setText(smoothingText(0));
     connect(m_smoothSlider, &QSlider::valueChanged, this, [this](int v) {
-        m_smoothLabel->setText(offOrValueText(v));
+        m_smoothLabel->setText(smoothingText(v));
         emit fftSmoothingChanged(v);
     });
 
@@ -3044,7 +3056,7 @@ void SpectrumOverlayMenu::syncExtraDisplaySettings(bool blankerOn, float blanker
         QSignalBlocker b(m_smoothSlider);
         m_smoothSlider->setValue(fftSmoothing);
         if (m_smoothLabel)
-            m_smoothLabel->setText(offOrValueText(m_smoothSlider->value()));
+            m_smoothLabel->setText(smoothingText(m_smoothSlider->value()));
     }
     if (m_freqGridSpacingCmb) {
         QSignalBlocker b(m_freqGridSpacingCmb);
