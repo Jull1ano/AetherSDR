@@ -36,6 +36,9 @@ constexpr const char* kExtRfGainKey = "rfGain";
 constexpr const char* kExtTxSetpointsKey = "txSetpoints";
 constexpr const char* kExtReceiversKey = "receivers";
 constexpr const char* kExtNotchesKey = "notches";
+// brick3-angelia: a host-DSP radio's filter per mode, beside the live
+// filterLowHz/filterHighHz the Passband domain already keeps.
+constexpr const char* kExtFiltersKey = "filters";
 
 // The declared domains' sub-objects of `ext`; load() and store() share it so
 // the two gates cannot drift apart.
@@ -46,6 +49,7 @@ QJsonObject gateExtension(const RadioCapabilities& caps, const QJsonObject& ext)
         {Domain::TxSetpoints, kExtTxSetpointsKey},
         {Domain::Receivers, kExtReceiversKey},
         {Domain::Notches, kExtNotchesKey},
+        {Domain::Passband, kExtFiltersKey},
     };
     QJsonObject gated;
     for (const auto& [domain, key] : domains) {

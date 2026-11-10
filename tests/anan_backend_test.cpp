@@ -244,8 +244,9 @@ int main(int argc, char** argv)
                       | RadioCapabilities::ClientSettingsDomain::Tuning
                       | RadioCapabilities::ClientSettingsDomain::ReceiveOutputLevel
                       | RadioCapabilities::ClientSettingsDomain::Agc
-                      | RadioCapabilities::ClientSettingsDomain::SpanRate),
-              "RF gain, tuning, radio output level, AGC AND span rate restore are declared -- "
+                      | RadioCapabilities::ClientSettingsDomain::SpanRate
+                      | RadioCapabilities::ClientSettingsDomain::Passband),
+              "RF gain, tuning, radio output level, AGC, span rate AND passband restore are declared -- "
               "this radio reports none of them, so the client is its only memory");
         bool scaleMatches = c.agcGainScale.has_value();
         for (const int knob : {0, 71, 100}) {

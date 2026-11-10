@@ -630,7 +630,10 @@ RadioCapabilities AnanBackend::capabilities() const
                               | RadioCapabilities::ClientSettingsDomain::Agc
                               // The zoomed-to DDC rate, so a session resumes
                               // at the span the operator left (brick3-angelia).
-                              | RadioCapabilities::ClientSettingsDomain::SpanRate;
+                              | RadioCapabilities::ClientSettingsDomain::SpanRate
+                              // The operator's filter, live and per mode
+                              // ("filters" extension), across restarts.
+                              | RadioCapabilities::ClientSettingsDomain::Passband;
     c.hostDroopCalibration = true; // AnanDroopCorrection.h -- real DDC0 roll-off,
                                     // corrected client-side via AnanDroopCalibrator
     c.extensionNamespaces = {QStringLiteral("anan")};  // "frontend.set", "droop.apply" -- see invokeExtension()
@@ -693,6 +696,16 @@ void AnanBackend::applyRestoredState(const RestoredRadioState& state)
             && std::abs(hi) <= kMaxRememberedFilterHz)
             m_filterByMode.insert(it.key(), {lo, hi});
     }
+    // The live filter the session ended with wins for its own mode: it is
+    // the newest edit, and it survives even where "filters" did not.
+    const double lo = state.filterLowHz, hi = state.filterHighHz;
+    if (!m_restoredMode.isEmpty() && std::isfinite(lo) && std::isfinite(hi) && lo < hi
+        && std::abs(lo) <= kMaxRememberedFilterHz && std::abs(hi) <= kMaxRememberedFilterHz) {
+        const bool mirrored = filterMirrored(m_restoredMode);
+        const int ilo = static_cast<int>(std::lround(mirrored ? -hi : lo));
+        const int ihi = static_cast<int>(std::lround(mirrored ? -lo : hi));
+        m_filterByMode.insert(filterMemoryKey(m_restoredMode), {ilo, ihi});
+    }
 }
 
 RestoredRadioState AnanBackend::currentOperatingState() const
@@ -707,6 +720,8 @@ RestoredRadioState AnanBackend::currentOperatingState() const
     state.agcThreshold = m_agcThreshold;
     state.agcOffLevels = {m_agcOffLevel};   // one receiver
     state.sampleRateHz = m_pendingParams.rx1RateKsps * 1000;   // SpanRate
+    state.filterLowHz = m_filterLowHz;                          // Passband
+    state.filterHighHz = m_filterHighHz;
     state.extensionSchemaVersion = 1;
     state.extension = QJsonObject{{QStringLiteral("rfGain"), QJsonObject{
         {QStringLiteral("adc0AttenuationDb"), m_pendingParams.adc0AttenuationDb},
