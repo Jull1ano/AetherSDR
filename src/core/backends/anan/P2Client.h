@@ -317,6 +317,25 @@ private:
     // always reported) -- an operator watching for a lossy link cares that
     // the session is dropping, not which receiver.
     quint64 m_drops = 0;
+    // brick3-angelia: packets missing (sequence distance of forward gaps),
+    // where m_drops counts gap events. Logged at most every kGapLogIntervalMs.
+    quint64 m_missingPackets = 0;
+    quint64 m_gapsSinceLog = 0;
+    quint64 m_missingSinceLog = 0;
+    QElapsedTimer m_gapLogClock;
+    static constexpr qint64 kGapLogIntervalMs = 10000;
+    // brick3-angelia: the OS default UDP receive buffer is 64 KB on Windows,
+    // ~56 ms of one 192 ksps DDC; a longer stall of this I/O thread (which
+    // also runs the DSP) overflowed it and lost ~1.5 % of the IQ on a Brick3,
+    // a tick each time. Thetis asks for ~1 MB; 4 MiB rides out ~3.5 s.
+    static constexpr int kRxSocketBufferBytes = 4 * 1024 * 1024;
+    // brick3-angelia: time between reads -- IQ arrives every ~1.2 ms, so a
+    // long wait is this thread busy elsewhere (the cushion must absorb it).
+    QElapsedTimer m_readGapClock;
+    QElapsedTimer m_readStallLogClock;
+    qint64 m_longestReadGapMs = 0;
+    quint64 m_readStalls = 0;
+    static constexpr qint64 kReadStallMs = 40;
     // What each counts, and why they are I/O-thread-only, is on LinkCounters.
     quint64 m_rxBytes = 0;
     quint64 m_rxPackets = 0;

@@ -126,6 +126,14 @@ bool P2Client::start(const Params& params, int connectTimeoutMs)
     // session's first frame.
     m_expectedSeq.fill(std::nullopt);
     m_drops = 0;
+    m_missingPackets = 0;
+    m_gapsSinceLog = 0;
+    m_missingSinceLog = 0;
+    m_gapLogClock.invalidate();
+    m_readGapClock.invalidate();
+    m_readStallLogClock.start();
+    m_longestReadGapMs = 0;
+    m_readStalls = 0;
     m_rxBytes = 0;
     m_rxPackets = 0;
     m_txBytes = 0;
@@ -140,6 +148,13 @@ bool P2Client::start(const Params& params, int connectTimeoutMs)
         m_socket = nullptr;
         return false;
     }
+    // brick3-angelia: see kRxSocketBufferBytes.
+    m_socket->setSocketOption(QAbstractSocket::ReceiveBufferSizeSocketOption,
+                              kRxSocketBufferBytes);
+    qCWarning(lcAnanP2).nospace()
+        << "ANAN: IQ receive buffer requested " << kRxSocketBufferBytes
+        << " bytes, granted "
+        << m_socket->socketOption(QAbstractSocket::ReceiveBufferSizeSocketOption).toInt();
     connect(m_socket, &QUdpSocket::readyRead, this, &P2Client::onReadyRead);
 
     m_running = true;
@@ -542,10 +557,31 @@ void P2Client::onConnectTimeout()
 
 void P2Client::onReadyRead()
 {
+    // brick3-angelia: see m_readGapClock.
+    if (m_readGapClock.isValid()) {
+        const qint64 gapMs = m_readGapClock.elapsed();
+        m_longestReadGapMs = std::max(m_longestReadGapMs, gapMs);
+        if (gapMs >= kReadStallMs)
+            ++m_readStalls;
+    }
     while (m_socket && m_socket->hasPendingDatagrams()) {
         const QNetworkDatagram dg = m_socket->receiveDatagram();
         handleDatagramFrom(dg.senderAddress(), asBytes(dg.data()),
                            static_cast<quint16>(dg.senderPort()));
+    }
+    m_readGapClock.start();
+    if (m_readStallLogClock.isValid()
+        && m_readStallLogClock.elapsed() >= kGapLogIntervalMs) {
+        if (m_readStalls > 0) {
+            qCWarning(lcAnanP2).nospace()
+                << "ANAN: I/O thread read stalls: " << m_readStalls
+                << " waits >= " << kReadStallMs << " ms, longest "
+                << m_longestReadGapMs << " ms in the last "
+                << m_readStallLogClock.elapsed() << " ms";
+        }
+        m_readStalls = 0;
+        m_longestReadGapMs = 0;
+        m_readStallLogClock.start();
     }
 }
 
@@ -647,6 +683,25 @@ void P2Client::handleDatagram(std::span<const std::uint8_t> bytes, quint16 sende
         // break continuity. Notify before delivery, independently of the legacy
         // drop counter (which counts each mismatch, not each missing packet).
         emit ddcSequenceGap(*ddcIndex);
+
+        // brick3-angelia: how much was lost, not just that something was.
+        const std::uint32_t distance = frame->seq - *m_expectedSeq[slot];
+        if (distance < 0x80000000u) {
+            m_missingPackets += distance;
+            m_missingSinceLog += distance;
+        }
+        ++m_gapsSinceLog;
+        if (!m_gapLogClock.isValid()
+            || m_gapLogClock.elapsed() >= kGapLogIntervalMs) {
+            qCWarning(lcAnanP2).nospace()
+                << "ANAN: IQ sequence gaps: " << m_gapsSinceLog << " gaps, "
+                << m_missingSinceLog << " packets missing since last report ("
+                << m_drops << " gaps, " << m_missingPackets << " packets of "
+                << m_rxPackets << " this session)";
+            m_gapsSinceLog = 0;
+            m_missingSinceLog = 0;
+            m_gapLogClock.start();
+        }
     }
     m_expectedSeq[slot] = frame->seq + 1;
 
