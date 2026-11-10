@@ -503,7 +503,7 @@ RadioCapabilities AnanBackend::capabilities() const
     c.receiveAudioCushionMs = 100;
     // brick3-angelia: measured on the radio -- 40 discovery requests sent
     // mid-stream gave 43 sequence gaps of ~50 IQ packets each.
-    c.quietDiscoveryWhileConnected = true;
+    c.quietDiscoveryWhileConnected = RadioCapabilities::QuietDiscoveryWhileConnected{};
     c.manufacturer = QStringLiteral("Apache Labs");
     c.model = QString::fromLatin1(anan::ananModelForBoard(m_discoveredBoardId));
     // The session takes its receive front-end options from AnanSettings

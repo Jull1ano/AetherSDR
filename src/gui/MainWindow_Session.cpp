@@ -1137,7 +1137,7 @@ void MainWindow::wireRadioModel()
     // no picker sweeps while it is connected; both sweeps reach UDP/1024.
     connect(&m_radioModel, &RadioModel::capabilitiesChanged,
             this, [this](bool connected, const RadioCapabilities& caps) {
-        const bool held = connected && caps.quietDiscoveryWhileConnected;
+        const bool held = connected && caps.quietDiscoveryWhileConnected.has_value();
         m_hl2Discovery.setSweepsHeld(held);
         m_ananDiscovery.setSweepsHeld(held);
     });

@@ -842,7 +842,9 @@ struct RadioCapabilities {
     // ~60 ms on EVERY discovery request reaching UDP/1024, Protocol 1 or 2:
     // the 5 s picker sweeps cost 1.5 % of the IQ, a tick each time
     // (brick3-angelia). Thetis sends no discovery while it runs either.
-    bool quietDiscoveryWhileConnected = false;
+    // Engaged = hold the sweeps; the record has no fields yet.
+    struct QuietDiscoveryWhileConnected {};
+    std::optional<QuietDiscoveryWhileConnected> quietDiscoveryWhileConnected;
     // The gain the AGC-T knob (0..100) sets: offsetDb + dbPerStep * knob, both
     // as the AGC's maximum gain and, with AGC off, as its fixed gain. The AGC-T
     // tooltips show it. Absent: no mapping declared, and the tooltips show the
