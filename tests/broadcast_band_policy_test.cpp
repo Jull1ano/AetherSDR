@@ -151,6 +151,21 @@ int main()
         check(p.context() == "SSB", "race: ends in the SSB context");
     }
 
+    // A band button carries its own mode: CB (AM) pressed on 41 m stays AM,
+    // and L/MW pressed on 40 m is not asked for AM a second time.
+    {
+        StepTable steps4;
+        Policy p;
+        p.onFrequency(7'300'000.0, "AM", 5'000, steps4);        // learns: on 41 m
+        const auto cb = p.onFrequency(27'185'000.0, "AM", 5'000, steps4, true);
+        check(!cb.mode, "band button CB: its AM is kept");
+        Policy q;
+        q.onFrequency(7'100'000.0, "LSB", 500, steps4);
+        const auto mw = q.onFrequency(999'000.0, "LSB", 500, steps4, true);
+        check(!mw.mode, "band button L/MW: its own AM request is not repeated");
+        check(mw.stepHz && *mw.stepHz == 9'000, "band button L/MW: 9 kHz step");
+    }
+
     // Persistence round trip.
     StepTable t{{"BC-MW", 9'000}, {"BC-SW", 5'000}, {"SSB", 500}, {"CW", 10}};
     check(parseSteps(serializeSteps(t)) == t, "steps survive a save and load");

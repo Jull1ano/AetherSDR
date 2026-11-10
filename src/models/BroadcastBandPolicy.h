@@ -156,14 +156,19 @@ public:
 
     // A frequency change (click, drag, wheel, band button). The first one
     // only learns where the slice is: a restored session is left as it was.
+    // `modeChosen`: the operator picked the mode with this move (a band
+    // button carries one, CB and WWV AM among them) -- the step still follows,
+    // the mode is theirs.
     Action onFrequency(double hz, std::string_view reportedMode, int currentStepHz,
-                       StepTable& steps)
+                       StepTable& steps, bool modeChosen = false)
     {
         Action action;
         const Kind kind = kindAt(hz);
         // A mode this policy asked for and the radio has not confirmed yet is
         // the slice's mode as far as the next decision goes: tuning back
         // across the edge before it lands must still undo it.
+        if (modeChosen)
+            m_pendingMode.reset();
         const std::string currentMode =
             m_pendingMode ? *m_pendingMode : std::string(reportedMode);
         if (!m_known) {
@@ -178,14 +183,14 @@ public:
         std::string targetMode(currentMode);
         if (m_kind == Kind::None) {
             // Entering: remember what to come back to.
-            m_modeBefore = std::string(currentMode);
-            if (!isAmFamily(currentMode))
+            m_modeBefore = modeChosen ? std::string() : std::string(currentMode);
+            if (!modeChosen && !isAmFamily(currentMode))
                 targetMode = "AM";
         } else if (kind == Kind::None) {
             // Leaving: only an AM slice is switched back; a mode the operator
             // picked inside the broadcast band (USB for a utility station,
             // say) is theirs and stays.
-            if (isAmFamily(currentMode)) {
+            if (!modeChosen && isAmFamily(currentMode)) {
                 if (!m_modeBefore.empty())
                     targetMode = m_modeBefore;
                 else

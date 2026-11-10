@@ -1830,8 +1830,15 @@ void RadioModel::wireBackendReceiverState()
                 broadcast::Policy& policy = m_broadcastPolicies[s->sliceId()];
                 const bool wasKnown = policy.known();
                 const std::string contextBefore = policy.context();
+                bool modeChosen = false;
+                if (const auto chosen = m_broadcastModeChosen.find(s->sliceId());
+                    chosen != m_broadcastModeChosen.end()) {
+                    modeChosen = !chosen->second.hasExpired();
+                    m_broadcastModeChosen.erase(chosen);   // one move only
+                }
                 const broadcast::Policy::Action action = policy.onFrequency(
-                    mhz * 1e6, s->mode().toStdString(), s->stepHz(), m_broadcastSteps);
+                    mhz * 1e6, s->mode().toStdString(), s->stepHz(), m_broadcastSteps,
+                    modeChosen);
                 if (wasKnown && policy.context() != contextBefore) {
                     saveBroadcastSteps();   // the place left keeps its step
                 }
@@ -4463,6 +4470,11 @@ void RadioModel::setBroadcastBandAuto(bool on)
     }
     m_broadcastBandAuto = on;
     m_broadcastPolicies.clear();   // the next frequency only learns where each slice is
+}
+
+void RadioModel::noteOperatorChosenMode(int sliceId)
+{
+    m_broadcastModeChosen[sliceId] = QDeadlineTimer(2000);
 }
 
 bool RadioModel::broadcastBandAutoActive() const

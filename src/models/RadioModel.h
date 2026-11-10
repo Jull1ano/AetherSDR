@@ -69,6 +69,7 @@
 
 #include <QTimer>
 #include <QElapsedTimer>
+#include <QDeadlineTimer>
 
 namespace AetherSDR {
 class TxController;
@@ -872,6 +873,9 @@ public:
     // only (ANAN, HL2): a Flex owns its slice's step.
     void setBroadcastBandAuto(bool on);
     bool broadcastBandAuto() const { return m_broadcastBandAuto; }
+    // The next frequency move of this slice (within 2 s) comes with a mode
+    // the operator chose -- a band button: the step follows, the mode stays.
+    void noteOperatorChosenMode(int sliceId);
     // The slice that transmits (IsTransmitSlice), or nullptr if none. Mirrors
     // FlexLib's TX-slice scan (CWX::getTXFrequency, CWX.cs:186) — keyer/CWX
     // targeting follows this slice, not the selected RX slice.
@@ -2343,6 +2347,7 @@ private:
     bool        m_broadcastStepsLoaded{false};
     broadcast::StepTable m_broadcastSteps;
     std::map<int, broadcast::Policy> m_broadcastPolicies;
+    std::map<int, QDeadlineTimer> m_broadcastModeChosen;   // see noteOperatorChosenMode()
     bool        m_lineoutMute{false};
     int         m_headphoneGain{50};
     bool        m_headphoneMute{false};

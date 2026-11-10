@@ -235,7 +235,9 @@ private:
     QStringList m_antList{"ANT1", "ANT2"};   // populated from ant_list key
 
     // Step sizes (Hz) — per-mode, swapped on mode change
-    QVector<int> m_stepSizes{10, 50, 100, 250, 500, 1000, 2500, 5000, 10000};
+    // 9 kHz: the long/medium-wave channel spacing in ITU Regions 1 and 3
+    // (brick3-angelia; the broadcast-band policy recalls it on MW).
+    QVector<int> m_stepSizes{10, 50, 100, 250, 500, 1000, 2500, 5000, 9000, 10000};
     int          m_stepIdx{2};          // index into m_stepSizes, default 100 Hz
     QPushButton* m_stepDown{nullptr};   // "<" button
     ScrollableLabel* m_stepLabel{nullptr};  // current step value display

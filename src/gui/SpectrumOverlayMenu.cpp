@@ -364,6 +364,10 @@ static constexpr BandGridEntry BAND_GRID[] = {
     // ModelCapabilities (#695).
     {"4",    "4m",   70.200,  "USB"},   // 16 — FLEX-6500 (Region 1) + FLEX-6700
     {"2",    "2m",  144.200,  "USB"},   // 17 — FLEX-6700
+    // brick3-angelia: broadcast and CB listening, tuned directly (no band
+    // stack slot). 999 kHz sits on the 9 kHz MW grid; 27.185 MHz is CB ch 19.
+    {"L/MW", "LMW",   0.999,  "AM"},    // 18
+    {"CB",   "CB",   27.185,  "AM"},    // 19
 };
 
 // Broad, non-regulatory grouping windows map a frequency that is already
@@ -417,6 +421,8 @@ static QString activePlanBandForFrequency(const BandPlanManager* manager,
 constexpr int kBandIdxXvtr = 15;
 constexpr int kBandIdx4m = 16;
 constexpr int kBandIdx2m = 17;
+constexpr int kBandIdxLmw = 18;
+constexpr int kBandIdxCb = 19;
 
 SpectrumOverlayMenu::SpectrumOverlayMenu(QWidget* parent)
     : QWidget(parent)
@@ -574,13 +580,14 @@ void SpectrumOverlayMenu::buildBandPanel()
     m_bandBtnFreqs.clear();
     m_lastHighlightedBand.clear();
 
+    // brick3-angelia: low to high, L/MW and CB in the two spare slots.
     constexpr int layout[][3] = {
-        {0, 1, 2},      // 160, 80, 60
-        {3, 4, 5},      // 40, 30, 20
-        {6, 7, 8},      // 17, 15, 12
-        {9, 10, -1},    // 10, 6
-        {11, 12, -1},   // WWV, GEN
-        {13, 14, 15},   // 2200, 630, XVTR
+        {13, 14, kBandIdxLmw},  // 2200, 630, L/MW
+        {0, 1, 2},              // 160, 80, 60
+        {3, 4, 5},              // 40, 30, 20
+        {6, 7, 8},              // 17, 15, 12
+        {9, kBandIdxCb, 10},    // 10, CB, 6
+        {11, 12, 15},           // WWV, GEN, XVTR
     };
 
     for (int row = 0; row < 6; ++row) {
@@ -3599,12 +3606,12 @@ void SpectrumOverlayMenu::setXvtrBands(const QVector<XvtrBand>& bands)
     grid->setContentsMargins(2, 2, 2, 2);
     grid->setSpacing(2);
 
-    // HF bands (indices 0-10)
+    // HF bands (indices 0-10), CB beside 10 m (brick3-angelia)
     constexpr int hfLayout[][3] = {
-        {0, 1, 2},      // 160, 80, 60
-        {3, 4, 5},      // 40, 30, 20
-        {6, 7, 8},      // 17, 15, 12
-        {9, 10, -1},    // 10, 6
+        {0, 1, 2},              // 160, 80, 60
+        {3, 4, 5},              // 40, 30, 20
+        {6, 7, 8},              // 17, 15, 12
+        {9, kBandIdxCb, 10},    // 10, CB, 6
     };
 
     auto makeBandBtn = [&](int idx) {
@@ -3624,7 +3631,51 @@ void SpectrumOverlayMenu::setXvtrBands(const QVector<XvtrBand>& bands)
         return btn;
     };
 
+    // Utility buttons (2200, 630, L/MW, WWV, GEN, XVTR config). A declared
+    // set belongs to a backend that owns its band surface: keep only targets
+    // its reported tuning range reaches, and never the Flex XVTR setup entry.
+    const bool radioDeclaredBandSet = !m_declaredBands.isEmpty();
+    auto addUtilityBtn = [&](int idx, int row, int col) {
+        const bool xvtrSetup = idx == kBandIdxXvtr;
+        const double targetMhz = BAND_GRID[idx].freqMhz;
+        if (!declaredBandMenuIncludesUtility(
+                radioDeclaredBandSet, xvtrSetup, targetMhz,
+                m_tuningMinMhz, m_tuningMaxMhz)) {
+            return;
+        }
+        auto* btn = new QPushButton(BAND_GRID[idx].label, m_bandPanel);
+        btn->setFixedSize(BAND_BTN_W, BAND_BTN_H);
+        ThemeManager::instance().applyStyleSheet(btn, kBandBtnStyle);
+        QString bandName = QString::fromLatin1(BAND_GRID[idx].bandName);
+        double freq = BAND_GRID[idx].freqMhz;
+        QString mode = QString::fromLatin1(BAND_GRID[idx].mode);
+        if (xvtrSetup) {
+            connect(btn, &QPushButton::clicked, this, [this]() {
+                hideAllSubPanels();
+                emit xvtrSetupRequested();
+            });
+        } else if (bandName.isEmpty()) {
+            btn->setEnabled(false);
+        } else {
+            btn->setCheckable(true);
+            connect(btn, &QPushButton::clicked, this, [this, bandName, freq, mode]() {
+                hideAllSubPanels();
+                emit bandSelected(bandName, freq, mode);
+            });
+            m_bandBtnFreqs.append({btn, freq});
+            m_bandButtons.append({btn, bandName});
+        }
+        grid->addWidget(btn, row, col);
+    };
+
     int row = 0;
+    // brick3-angelia: low to high -- the LF/MF row first.
+    {
+        constexpr int lowRow[3] = {13, 14, kBandIdxLmw};   // 2200, 630, L/MW
+        for (int col = 0; col < 3; ++col)
+            addUtilityBtn(lowRow[col], row, col);
+        ++row;
+    }
     if (!m_declaredBands.isEmpty()) {
         // The radio declared its own band set ("bands=" discovery/status
         // key — gateways presenting non-Flex hardware).  Build the grid
@@ -3686,7 +3737,6 @@ void SpectrumOverlayMenu::setXvtrBands(const QVector<XvtrBand>& bands)
 
     // XVTR bands (inserted between HF and utility)
     m_xvtrBandBtns.clear();
-    const bool radioDeclaredBandSet = !m_declaredBands.isEmpty();
     const int xvtrBandCount = configuredXvtrBandCount(
         radioDeclaredBandSet, bands.size());
     for (int i = 0; i < xvtrBandCount; ++i) {
@@ -3709,51 +3759,11 @@ void SpectrumOverlayMenu::setXvtrBands(const QVector<XvtrBand>& bands)
         row += (xvtrBandCount + 2) / 3;  // advance past XVTR rows
     }
 
-    // Utility buttons: WWV, GEN, 2200, 630, XVTR config
-    constexpr int utilLayout[][3] = {
-        {11, 12, -1},   // WWV, GEN
-        {13, 14, 15},   // 2200, 630, XVTR
-    };
-    for (int r = 0; r < 2; ++r) {
-        for (int col = 0; col < 3; ++col) {
-            int idx = utilLayout[r][col];
-            if (idx < 0) continue;
-            // A declared set belongs to a backend that owns its band surface.
-            // Retain only utility targets proven reachable by its reported
-            // tuning range, and never expose the Flex XVTR setup entry.
-            const bool xvtrSetup = idx == kBandIdxXvtr;
-            const double targetMhz = BAND_GRID[idx].freqMhz;
-            if (!declaredBandMenuIncludesUtility(
-                    radioDeclaredBandSet, xvtrSetup, targetMhz,
-                    m_tuningMinMhz, m_tuningMaxMhz)) {
-                continue;
-            }
-            auto* btn = new QPushButton(BAND_GRID[idx].label, m_bandPanel);
-            btn->setFixedSize(BAND_BTN_W, BAND_BTN_H);
-            ThemeManager::instance().applyStyleSheet(btn, kBandBtnStyle);
-            QString bandName = QString::fromLatin1(BAND_GRID[idx].bandName);
-            double freq = BAND_GRID[idx].freqMhz;
-            QString mode = QString::fromLatin1(BAND_GRID[idx].mode);
-            if (xvtrSetup) {
-                connect(btn, &QPushButton::clicked, this, [this]() {
-                    hideAllSubPanels();
-                    emit xvtrSetupRequested();
-                });
-            } else if (bandName.isEmpty()) {
-                btn->setEnabled(false);
-            } else {
-                btn->setCheckable(true);
-                connect(btn, &QPushButton::clicked, this, [this, bandName, freq, mode]() {
-                    hideAllSubPanels();
-                    emit bandSelected(bandName, freq, mode);
-                });
-                m_bandBtnFreqs.append({btn, freq});
-                m_bandButtons.append({btn, bandName});
-            }
-            grid->addWidget(btn, row, col);
-        }
-        ++row;
-    }
+    // WWV, GEN, XVTR config
+    constexpr int utilRow[3] = {11, 12, kBandIdxXvtr};
+    for (int col = 0; col < 3; ++col)
+        addUtilityBtn(utilRow[col], row, col);
+    ++row;
 
     updateActiveBandHighlight();
     m_bandPanel->adjustSize();

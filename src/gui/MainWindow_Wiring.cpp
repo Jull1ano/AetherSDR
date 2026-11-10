@@ -3726,8 +3726,11 @@ void MainWindow::selectBand(const QString& panId, const QString& bandName, doubl
     // band; WWV / GEN → 33 / 34; built-in 4m / 2m → "4" / "2" when the model has
     // them. No mapping → refuse and leave state untouched.
     // Radios without a band stack (HL2): the app is authoritative, so tune to
-    // the button's freqMhz/mode directly.
-    if (!m_radioModel.usesFlexCommandPlane()) {
+    // the button's freqMhz/mode directly. brick3-angelia: so are L/MW and CB
+    // on every radio -- no Flex band-stack slot exists for them.
+    const bool tuneOnlyBand = bandName == QLatin1String("LMW")
+                              || bandName == QLatin1String("CB");
+    if (!m_radioModel.usesFlexCommandPlane() || tuneOnlyBand) {
         const RadioCapabilities caps = m_radioModel.backendCapabilities();
         // Refuse rather than tune outside a reported receiver range (no range
         // reported = no check). evaluateBandTune() is shared with the typed-tune
@@ -3752,6 +3755,10 @@ void MainWindow::selectBand(const QString& panId, const QString& bandName, doubl
         }
         clearSwrSweepForBandChange(s->sliceId(), panId, bandName);
         m_bandSettings.setCurrentBand(bandName);
+        // brick3-angelia: the button's mode is the operator's choice; the
+        // broadcast-band policy keeps it and only follows with the step.
+        if (!mode.isEmpty())
+            m_radioModel.noteOperatorChosenMode(s->sliceId());
         // MODE FIRST, then frequency. The backend adopts a mode-appropriate
         // passband on a mode CHANGE (Hl2Backend::setSliceMode), and the
         // frequency move is what re-selects the companion filter board — so

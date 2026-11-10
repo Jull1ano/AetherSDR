@@ -1243,7 +1243,7 @@ void MainWindow::registerShortcutActions()
     auto cycleStep = [this](int dir) {
         auto* sw = spectrum();
         if (!sw) return;
-        static const int steps[] = {10, 50, 100, 250, 500, 1000, 2500, 5000, 10000};
+        static const int steps[] = {10, 50, 100, 250, 500, 1000, 2500, 5000, 9000, 10000};
         int cur = sw->stepSize();
         // A deliberate step change, so it reaches the slice and the applet too.
         // Clamped at both ends, unlike RxApplet::cycleStepUp(), which wraps.
