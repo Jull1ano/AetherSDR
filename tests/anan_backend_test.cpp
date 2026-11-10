@@ -225,8 +225,8 @@ int main(int argc, char** argv)
               "FFT FPS is the client's to keep, as on the HL2 (brick3-angelia)");
         check(c.autoAgcThresholdControl.has_value(),
               "Auto AGC-T is offered: this host tracks the noise floor (brick3-angelia)");
-        check(c.receiveAudioCushionMs == 60,
-              "a 60 ms receive-audio cushion is declared: the DSP hands over 5 ms blocks");
+        check(c.receiveAudioCushionMs == 100,
+              "a 100 ms receive-audio cushion is declared: the DSP hands over audio in clumps");
         check(AnanBackend::autoAgcKnobFor(-101.0) == 59
                   && AnanBackend::autoAgcKnobFor(-200.0) == 100
                   && AnanBackend::autoAgcKnobFor(0.0) == 0,

@@ -882,12 +882,7 @@ void AudioEngine::setReceivePresentationDelays(
     int kiwiDelayMs,
     const QString& externalKiwiDelaySourceId)
 {
-    m_requestedFlexDelayMs = flexDelayMs;
-    m_requestedKiwiDelayMs = kiwiDelayMs;
-    m_requestedKiwiDelaySourceId = externalKiwiDelaySourceId;
-    // The radio's cushion is a floor under what the sync asks for.
-    const int flexDelay = std::max(qBound(0, flexDelayMs, 5000),
-                                   m_rxCushionFloorMs.load(std::memory_order_relaxed));
+    const int flexDelay = qBound(0, flexDelayMs, 5000);
     const int kiwiDelay = qBound(0, kiwiDelayMs, 5000);
     const QString externalKiwiDelayId = externalKiwiDelaySourceId.trimmed();
     const int legacyKiwiDelay = externalKiwiDelayId.isEmpty() ? kiwiDelay : 0;
@@ -979,8 +974,8 @@ void AudioEngine::setReceiveCushionFloorMs(int ms)
     if (previous == floor) {
         return;
     }
-    setReceivePresentationDelays(m_requestedFlexDelayMs, m_requestedKiwiDelayMs,
-                                 m_requestedKiwiDelaySourceId);
+    // Collect the cushion before the main path plays again (drainRxAudio()).
+    m_rxCushionPrebuffering.store(floor > 0, std::memory_order_relaxed);
 #ifdef Q_OS_WIN
     // The Windows device buffer follows the floor (startRxStream()), and is
     // only sized when the sink opens: reopen a running sink when it changes.
@@ -2137,6 +2132,38 @@ void AudioEngine::drainRxAudio(qsizetype freeBytes)
         m_radeRxBuffer.remove(0, m_radeRxBuffer.size() - outputMaxBufBytes);
     }
 
+    // brick3-angelia: a radio's receive cushion (setReceiveCushionFloorMs())
+    // is a jitter prebuffer, unlike the presentation delay below, which holds
+    // audio back in this queue: collect the cushion across this queue AND the
+    // device, then let all of it reach the device, and collect again only
+    // when both are nearly empty. Held here, the device sat at 12-28 ms of
+    // its 120 ms on a Brick3 and still ran dry on late drains.
+    const int rxCushionMs = m_rxCushionFloorMs.load(std::memory_order_relaxed);
+    const int mainProducerRate = m_rxProducerRate.load();
+    const qsizetype deviceQueuedRawBytes = (rxCushionMs > 0 && m_audioSink)
+        ? rawEquivalentAudioBytes(
+              std::max<qsizetype>(0, m_audioSink->bufferSize() - freeBytes)
+                  + m_rxOutputBuffer.size(),
+              sampleRate, mainProducerRate)
+        : 0;
+    const qsizetype cushionGuardBytes =
+        audioBytesForMsAtRate(mainProducerRate, kRxCushionUnderrunGuardMs);
+    if (rxCushionMs <= 0) {
+        m_rxCushionPrebuffering.store(false, std::memory_order_relaxed);
+    } else {
+        const qsizetype mainQueuedBytes =
+            (m_nr2Enabled.load(std::memory_order_relaxed)
+                 ? queuedAudioBytes(m_rxPackets) : m_rxBuffer.size())
+            + deviceQueuedRawBytes;
+        if (m_rxCushionPrebuffering.load(std::memory_order_relaxed)) {
+            if (mainQueuedBytes >= audioBytesForMsAtRate(mainProducerRate, rxCushionMs)) {
+                m_rxCushionPrebuffering.store(false, std::memory_order_relaxed);
+            }
+        } else if (mainQueuedBytes < cushionGuardBytes) {
+            m_rxCushionPrebuffering.store(true, std::memory_order_relaxed);
+        }
+    }
+
     if (freeBytes > 0 && m_rxBuffer.isEmpty()
         && m_rxPackets.empty()
         && m_kiwiSdrRxBuffer.isEmpty() && m_kiwiSdrRxPackets.empty()
@@ -2151,7 +2178,9 @@ void AudioEngine::drainRxAudio(qsizetype freeBytes)
                     source->prebuffering = true;
                 }
             }
-        } else {
+        } else if (rxCushionMs <= 0 || deviceQueuedRawBytes < cushionGuardBytes) {
+            // With a cushion the device normally holds the audio and this
+            // queue is empty; only a nearly empty device is an underrun.
             m_rxBufferUnderrunCount.fetch_add(1);
         }
         if (flexPresentationDelayMs > 0) {
@@ -2192,8 +2221,10 @@ void AudioEngine::drainRxAudio(qsizetype freeBytes)
         m_rxPresentationPrebuffering.store(true,
                                            std::memory_order_relaxed);
     }
+    // The main path also waits while the radio's cushion collects.
     const bool flexPresentationPrebuffering =
-        m_rxPresentationPrebuffering.load(std::memory_order_relaxed);
+        m_rxPresentationPrebuffering.load(std::memory_order_relaxed)
+        || m_rxCushionPrebuffering.load(std::memory_order_relaxed);
 
     // Zombie sink watchdog: if we have data waiting but the sink reports
     // zero bytes free for ~2 seconds, the WASAPI handle is likely stale
@@ -4293,9 +4324,10 @@ bool AudioEngine::openRxSinkDevice(int producerRate)
         // app-side m_rxBufferCapMs cap and produces 300-500 ms+ speaker latency.
         // A 50 ms device buffer is comfortably fed by the 10 ms RX drain timer and
         // mirrors the explicit buffers already used for the sidetone/Quindar sinks.
-        // A radio that declares a receive cushion gets 120 ms (brick3-angelia):
+        // A radio that declares a receive cushion gets 160 ms (brick3-angelia):
         // on a Brick3 session the 10 ms drain ran every 19 ms on median and up
-        // to 60 ms late, so 50 ms ran dry 10 times in 10 s with audio queued.
+        // to 60 ms late, so 50 ms ran dry 10 times in 10 s with audio queued;
+        // the cushion then lives in this buffer (drainRxAudio()).
         const int kWinRxDeviceBufferMs = m_rxCushionFloorMs.load(std::memory_order_relaxed) > 0
             ? kWinRxDeviceBufferWithCushionMs : 50;
         const qint64 winRxBufBytes = candidate.bytesForDuration(kWinRxDeviceBufferMs * 1000LL);

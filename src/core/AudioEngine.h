@@ -198,9 +198,10 @@ public:
         int flexDelayMs,
         int kiwiDelayMs,
         const QString& externalKiwiDelaySourceId = QString());
-    // The least the main receive path keeps queued ahead of the speaker, in
-    // ms, whatever the presentation sync asks (RadioCapabilities::
-    // receiveAudioCushionMs). 0 = no floor. Same thread as the setter above.
+    // A jitter cushion for the main receive path, in ms (RadioCapabilities::
+    // receiveAudioCushionMs): collected across the queue and the device
+    // before playback, and again after an underrun. 0 = none. Independent of
+    // the presentation delays above. Same thread as the setter above.
     void setReceiveCushionFloorMs(int ms);
     void resetReceivePresentationAudioBuffers();
     void resetReceivePresentationAudioBuffersForKiwiSource(
@@ -1574,14 +1575,15 @@ private:
     float             m_flexTxGateGain{1.0f};
     std::atomic<int>  m_flexReceivePresentationDelayMs{0};
     std::atomic<int>  m_kiwiReceivePresentationDelayMs{0};
-    // brick3-angelia: setReceiveCushionFloorMs()'s floor, and the delays the
-    // sync last asked for, so a floor change can re-apply them.
+    // brick3-angelia: setReceiveCushionFloorMs()'s jitter cushion, and
+    // whether the main path is collecting it (drainRxAudio()).
     std::atomic<int>  m_rxCushionFloorMs{0};
-    // Windows RX device buffer while a cushion floor is set (startRxStream()).
-    static constexpr int kWinRxDeviceBufferWithCushionMs = 120;
-    int               m_requestedFlexDelayMs{0};
-    int               m_requestedKiwiDelayMs{0};
-    QString           m_requestedKiwiDelaySourceId;
+    std::atomic<bool> m_rxCushionPrebuffering{false};
+    // Queue + device below this is an underrun: collect the cushion again.
+    static constexpr int kRxCushionUnderrunGuardMs = 5;
+    // Windows RX device buffer while a cushion is set (startRxStream()):
+    // room for the whole cushion plus the drain's lateness.
+    static constexpr int kWinRxDeviceBufferWithCushionMs = 160;
     QString           m_externalKiwiReceivePresentationDelaySourceId;
     int               m_externalKiwiReceivePresentationDelayMs{0};
     std::atomic<bool> m_rxPresentationPrebuffering{false};
