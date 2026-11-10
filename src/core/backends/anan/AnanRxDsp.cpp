@@ -111,6 +111,10 @@ AnanRxDsp::RebuildResult AnanRxDsp::buildChannel(const Config& config)
     // at that default, band noise alone peaked at +8 dBFS on a Brick3 and
     // every speech peak clipped (offline WDSP harness, brick3-angelia).
     wc.rxPanelGain = 1.0;
+    // brick3-angelia: mono, as Thetis defaults. WDSP's binaural default put
+    // the audio's Hilbert transform in the right ear: on a Brick3 recording
+    // the ears correlated 0.000 in USB and LSB, heard as fake stereo.
+    wc.rxBinaural = false;
     // filterTaps left at WdspChannel::Config's own default (2048): this
     // phase has no manual notch filter, so there is no narrow-notch floor to
     // widen it for (contrast Hl2RxDsp::kRxFilterTaps, which exists solely

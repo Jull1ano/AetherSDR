@@ -1464,6 +1464,10 @@ bool WdspChannel::validateConfig(const Config& config, std::string* error) noexc
         setError(error, "WDSP RX panel gain must be finite, non-negative and receive-only");
         return false;
     }
+    if (config.rxBinaural && config.direction != Direction::Receive) {
+        setError(error, "WDSP RX panel binaural is receive-only");
+        return false;
+    }
     return true;
 }
 
@@ -1615,6 +1619,9 @@ bool WdspChannel::open() noexcept
         }
         if (m_config.rxPanelGain) {  // a set field wins over the FM value above
             SetRXAPanelGain1(m_channelId, *m_config.rxPanelGain);
+        }
+        if (m_config.rxBinaural && !m_config.wbfmReceive) {
+            SetRXAPanelBinaural(m_channelId, *m_config.rxBinaural ? 1 : 0);
         }
         if (m_config.wbfmReceive) {
             m_wbfm = std::make_unique<WbfmState>(m_config);

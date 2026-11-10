@@ -91,6 +91,10 @@ void SetRXAFMDeviation(int channel, double deviationHz);
 void SetRXAFMLimGain(int channel, double maximumGainDb);
 void SetRXAFMLimRun(int channel, int run);
 void SetRXAPanelGain1(int channel, double gain);
+// 1 = the panel's I and Q to the left and right ear (WDSP's default: for
+// SSB/CW/digital that is the signal and its Hilbert transform, heard as a
+// phasey "fake stereo"); 0 = I copied to both ears (mono, Thetis's default).
+void SetRXAPanelBinaural(int channel, int bin);
 void SetRXABandpassFreqs(int channel, double lowHz, double highHz);
 // Canonical passband setter. RXASetPassband() is what both reference clients
 // (Thetis, pihpsdr) call: it sets the bandpass AND the SNBA output bandwidth

@@ -139,6 +139,13 @@ public:
         // RXA output panel gain, linear, applied after the AGC. Unset keeps
         // WDSP's create_rxa() default of 4.0 (+12.04 dB, #5942).
         std::optional<double> rxPanelGain;
+        // RXA output panel binaural (SetRXAPanelBinaural). Unset keeps WDSP's
+        // create_rxa() default: binaural, I left and Q right, which for
+        // SSB/CW/digital is the audio and its Hilbert transform -- a phasey
+        // fake stereo (correlation 0 between ears). false = mono, as Thetis
+        // defaults. Never applied to WBFM, whose stereo decoder feeds the
+        // same panel (brick3-angelia).
+        std::optional<bool> rxBinaural;
         double filterLowHz = 150.0;
         double filterHighHz = 3000.0;
         int agcMode = 3;
