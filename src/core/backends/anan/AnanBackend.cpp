@@ -148,6 +148,44 @@ std::pair<int, int> AnanBackend::defaultPassbandForMode(const QString& mode) noe
     return {150, 3000};   // matches modeFromString's USB fallback
 }
 
+namespace {
+// brick3-angelia: which modes share a remembered filter, and whether the
+// stored (upper-sideband) passband is mirrored for this one.
+QString filterMemoryKey(const QString& mode)
+{
+    const QString u = mode.toUpper();
+    if (u == QLatin1String("LSB") || u == QLatin1String("USB")) return QStringLiteral("SSB");
+    if (u == QLatin1String("DIGL") || u == QLatin1String("DIGU")) return QStringLiteral("DIG");
+    if (u == QLatin1String("CW") || u == QLatin1String("CWU") || u == QLatin1String("CWL"))
+        return QStringLiteral("CW");
+    return u;
+}
+
+bool filterMirrored(const QString& mode)
+{
+    const QString u = mode.toUpper();
+    return u == QLatin1String("LSB") || u == QLatin1String("DIGL");
+}
+
+constexpr int kMaxRememberedFilterHz = 50000;
+}  // namespace
+
+std::pair<int, int> AnanBackend::passbandForMode(const QString& mode) const
+{
+    const auto it = m_filterByMode.constFind(filterMemoryKey(mode));
+    if (it == m_filterByMode.cend())
+        return defaultPassbandForMode(mode);
+    const auto [lo, hi] = it.value();
+    return filterMirrored(mode) ? std::pair<int, int>{-hi, -lo} : it.value();
+}
+
+void AnanBackend::rememberFilter()
+{
+    const int lo = filterMirrored(m_mode) ? -m_filterHighHz : m_filterLowHz;
+    const int hi = filterMirrored(m_mode) ? -m_filterLowHz : m_filterHighHz;
+    m_filterByMode.insert(filterMemoryKey(m_mode), {lo, hi});
+}
+
 double AnanBackend::cwBfoOffsetHz(const QString& mode, int pitchHz) noexcept
 {
     const QString u = mode.toUpper();
@@ -643,6 +681,18 @@ void AnanBackend::applyRestoredState(const RestoredRadioState& state)
     // radio A's zoom for radio B.
     m_restoredRateKsps = state.sampleRateHz > 0
         ? nearestDdc0RateKsps(state.sampleRateHz / 1000) : 0;
+    // brick3-angelia: the operator's filters, unconditional like the rest.
+    m_filterByMode.clear();
+    const QJsonObject filters = state.extension.value(QStringLiteral("filters")).toObject();
+    for (auto it = filters.begin(); it != filters.end(); ++it) {
+        const QJsonArray pair = it.value().toArray();
+        if (pair.size() != 2)
+            continue;
+        const int lo = pair.at(0).toInt(), hi = pair.at(1).toInt();
+        if (lo < hi && std::abs(lo) <= kMaxRememberedFilterHz
+            && std::abs(hi) <= kMaxRememberedFilterHz)
+            m_filterByMode.insert(it.key(), {lo, hi});
+    }
 }
 
 RestoredRadioState AnanBackend::currentOperatingState() const
@@ -661,6 +711,12 @@ RestoredRadioState AnanBackend::currentOperatingState() const
     state.extension = QJsonObject{{QStringLiteral("rfGain"), QJsonObject{
         {QStringLiteral("adc0AttenuationDb"), m_pendingParams.adc0AttenuationDb},
         {QStringLiteral("adc1AttenuationDb"), m_pendingParams.adc1AttenuationDb}}}};
+    // brick3-angelia: the operator's filter per mode family.
+    QJsonObject filters;
+    for (auto it = m_filterByMode.cbegin(); it != m_filterByMode.cend(); ++it)
+        filters.insert(it.key(), QJsonArray{it.value().first, it.value().second});
+    if (!filters.isEmpty())
+        state.extension.insert(QStringLiteral("filters"), filters);
     return state;
 }
 
@@ -789,8 +845,11 @@ void AnanBackend::connectRadio(const RadioConnectRequest& request)
     // resets only on a mode change, as in setSliceMode().
     const QString mode = m_restoredMode.isEmpty()
         ? QString::fromLatin1(kFirstConnectMode) : m_restoredMode;
-    if (mode.compare(m_mode, Qt::CaseInsensitive) != 0) {
-        const auto [lo, hi] = defaultPassbandForMode(mode);
+    // brick3-angelia: a filter the operator set for this mode is restored
+    // even when the mode matches the backend's own starting one.
+    if (mode.compare(m_mode, Qt::CaseInsensitive) != 0
+        || m_filterByMode.contains(filterMemoryKey(mode))) {
+        const auto [lo, hi] = passbandForMode(mode);
         m_filterLowHz = lo;
         m_filterHighHz = hi;
     }
@@ -1041,7 +1100,8 @@ void AnanBackend::setSliceMode(int sliceId, const QString& mode)
     // mode actually changes, so a repeated set does not clobber an
     // operator's manual filter edit.
     if (mode.compare(m_mode, Qt::CaseInsensitive) != 0) {
-        const auto [lo, hi] = defaultPassbandForMode(mode);
+        // brick3-angelia: the operator's filter for this mode, else the default.
+        const auto [lo, hi] = passbandForMode(mode);
         m_filterLowHz = lo;
         m_filterHighHz = hi;
     }
@@ -1063,6 +1123,10 @@ void AnanBackend::setSliceFilter(int sliceId, int lowHz, int highHz)
             Q_ARG(double, static_cast<double>(highHz) + bfo));
     }
     emitSliceState();
+    // brick3-angelia: remembered per mode and saved, so a mode change, a band
+    // button or a restart brings the operator's width back, not the default.
+    rememberFilter();
+    emit operatingStateChanged();
 }
 
 void AnanBackend::setSliceAgc(int sliceId, const QString& mode, int thresholdDb)

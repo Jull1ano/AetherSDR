@@ -22,6 +22,8 @@
 #include "models/SliceModel.h"
 
 #include <QCoreApplication>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QProcess>
 #include <QSignalSpy>
 #include <QVariantList>
@@ -300,12 +302,30 @@ int main(int argc, char** argv)
         check(last->filterLow.value_or(-1) == 300,
               "re-setting the same mode preserves the operator's manual filter edit");
 
-        // Switching to a DIFFERENT mode DOES reset to that mode's default.
+        // brick3-angelia: LSB shares the operator's SSB width, mirrored.
         backend.setSliceMode(0, QStringLiteral("LSB"));
-        check(last->filterLow.value_or(1) == -2900 && last->filterHigh.value_or(1) == -100,
-              "switching mode resets to the new mode's default passband");
+        check(last->filterLow.value_or(1) == -2700 && last->filterHigh.value_or(1) == -300,
+              "switching USB to LSB keeps the operator's SSB width, mirrored");
         check(last->mode.value_or(QString()) == QStringLiteral("LSB"),
               "mode field reflects the new mode");
+
+        // A mode with no filter of the operator's gets its default.
+        backend.setSliceMode(0, QStringLiteral("AM"));
+        check(last->filterLow.value_or(1) == -4000 && last->filterHigh.value_or(1) == 4000,
+              "a mode never filtered by hand starts at its default passband");
+        backend.setSliceFilter(0, -3000, 3000);
+        backend.setSliceMode(0, QStringLiteral("LSB"));
+        backend.setSliceMode(0, QStringLiteral("AM"));
+        check(last->filterLow.value_or(1) == -3000 && last->filterHigh.value_or(1) == 3000,
+              "and returns to the operator's AM filter after another mode");
+
+        // Saved with the operating state and restored by a fresh backend.
+        AnanBackend restarted;
+        restarted.applyRestoredState(backend.currentOperatingState());
+        check(restarted.currentOperatingState().extension.value(QStringLiteral("filters"))
+                      .toObject().value(QStringLiteral("SSB")).toArray()
+                  == QJsonArray{300, 2700},
+              "the operator's filters survive a restart");
     }
 
     // ---- AGC-T knob scale: -20..120 dB, deskHPSDR's and Thetis's range ----

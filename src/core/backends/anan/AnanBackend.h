@@ -126,6 +126,9 @@ public:
     // Per-mode default passband, operator-facing (marker-relative) Hz.
     // Vocabulary matches modeFromString's.
     [[nodiscard]] static std::pair<int, int> defaultPassbandForMode(const QString& mode) noexcept;
+    // brick3-angelia: the operator's filter for this mode if one was set
+    // (LSB/USB and DIGL/DIGU share one width, mirrored), else the default.
+    [[nodiscard]] std::pair<int, int> passbandForMode(const QString& mode) const;
 
     // Every spelling modeFromString() maps, case-insensitive. The restore needs
     // it because modeFromString() falls back to USB instead of failing.
@@ -444,6 +447,11 @@ private:
     QString m_mode = QStringLiteral("USB");
     int m_filterLowHz = 100;
     int m_filterHighHz = 2900;
+    // brick3-angelia: the operator's filter per mode family, kept in the
+    // upper-sideband orientation for SSB and DIG (see passbandForMode()),
+    // saved in the operating state's extension "filters".
+    QMap<QString, std::pair<int, int>> m_filterByMode;
+    void rememberFilter();
     int m_cwPitchHz = 600;
     double m_sliceFreqHz = 0.0;
     // brick3-angelia: RX1's DDC centre, i.e. the pan centre. It stays put
