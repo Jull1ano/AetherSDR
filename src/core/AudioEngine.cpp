@@ -975,11 +975,20 @@ void AudioEngine::setReceivePresentationDelays(
 void AudioEngine::setReceiveCushionFloorMs(int ms)
 {
     const int floor = qBound(0, ms, 500);
-    if (m_rxCushionFloorMs.exchange(floor, std::memory_order_relaxed) == floor) {
+    const int previous = m_rxCushionFloorMs.exchange(floor, std::memory_order_relaxed);
+    if (previous == floor) {
         return;
     }
     setReceivePresentationDelays(m_requestedFlexDelayMs, m_requestedKiwiDelayMs,
                                  m_requestedKiwiDelaySourceId);
+#ifdef Q_OS_WIN
+    // The Windows device buffer follows the floor (startRxStream()), and is
+    // only sized when the sink opens: reopen a running sink when it changes.
+    if ((previous > 0) != (floor > 0) && m_audioSink) {
+        stopRxStream();
+        startRxStream();
+    }
+#endif
 }
 
 void AudioEngine::resetReceivePresentationAudioBuffers()
@@ -4284,7 +4293,11 @@ bool AudioEngine::openRxSinkDevice(int producerRate)
         // app-side m_rxBufferCapMs cap and produces 300-500 ms+ speaker latency.
         // A 50 ms device buffer is comfortably fed by the 10 ms RX drain timer and
         // mirrors the explicit buffers already used for the sidetone/Quindar sinks.
-        constexpr int kWinRxDeviceBufferMs = 50;
+        // A radio that declares a receive cushion gets 120 ms (brick3-angelia):
+        // on a Brick3 session the 10 ms drain ran every 19 ms on median and up
+        // to 60 ms late, so 50 ms ran dry 10 times in 10 s with audio queued.
+        const int kWinRxDeviceBufferMs = m_rxCushionFloorMs.load(std::memory_order_relaxed) > 0
+            ? kWinRxDeviceBufferWithCushionMs : 50;
         const qint64 winRxBufBytes = candidate.bytesForDuration(kWinRxDeviceBufferMs * 1000LL);
         if (winRxBufBytes > 0)
             sink->setBufferSize(static_cast<qsizetype>(winRxBufBytes));

@@ -1577,6 +1577,8 @@ private:
     // brick3-angelia: setReceiveCushionFloorMs()'s floor, and the delays the
     // sync last asked for, so a floor change can re-apply them.
     std::atomic<int>  m_rxCushionFloorMs{0};
+    // Windows RX device buffer while a cushion floor is set (startRxStream()).
+    static constexpr int kWinRxDeviceBufferWithCushionMs = 120;
     int               m_requestedFlexDelayMs{0};
     int               m_requestedKiwiDelayMs{0};
     QString           m_requestedKiwiDelaySourceId;
