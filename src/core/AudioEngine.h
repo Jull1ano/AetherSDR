@@ -198,6 +198,10 @@ public:
         int flexDelayMs,
         int kiwiDelayMs,
         const QString& externalKiwiDelaySourceId = QString());
+    // The least the main receive path keeps queued ahead of the speaker, in
+    // ms, whatever the presentation sync asks (RadioCapabilities::
+    // receiveAudioCushionMs). 0 = no floor. Same thread as the setter above.
+    void setReceiveCushionFloorMs(int ms);
     void resetReceivePresentationAudioBuffers();
     void resetReceivePresentationAudioBuffersForKiwiSource(
         const QString& sourceId);
@@ -1570,6 +1574,12 @@ private:
     float             m_flexTxGateGain{1.0f};
     std::atomic<int>  m_flexReceivePresentationDelayMs{0};
     std::atomic<int>  m_kiwiReceivePresentationDelayMs{0};
+    // brick3-angelia: setReceiveCushionFloorMs()'s floor, and the delays the
+    // sync last asked for, so a floor change can re-apply them.
+    std::atomic<int>  m_rxCushionFloorMs{0};
+    int               m_requestedFlexDelayMs{0};
+    int               m_requestedKiwiDelayMs{0};
+    QString           m_requestedKiwiDelaySourceId;
     QString           m_externalKiwiReceivePresentationDelaySourceId;
     int               m_externalKiwiReceivePresentationDelayMs{0};
     std::atomic<bool> m_rxPresentationPrebuffering{false};

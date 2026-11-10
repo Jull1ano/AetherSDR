@@ -497,6 +497,10 @@ RadioCapabilities AnanBackend::capabilities() const
     c.agcGainScale = RadioCapabilities::AgcGainScale{kAgcKnobMinDb, kAgcKnobDbPerStep};
     // brick3-angelia: Auto AGC-T runs in this host (requestSliceAgcThresholdMode).
     c.autoAgcThresholdControl = RadioCapabilities::AutoAgcThresholdControl{};
+    // brick3-angelia: audio leaves the DSP in 5 ms blocks at 192 ksps, as the
+    // network delivers IQ. With no queue the speaker underran 2322 times in a
+    // minute on a Brick3 (bridge: rxBufferUnderrunCount, level 0-13 ms).
+    c.receiveAudioCushionMs = 60;
     c.manufacturer = QStringLiteral("Apache Labs");
     c.model = QString::fromLatin1(anan::ananModelForBoard(m_discoveredBoardId));
     // The session takes its receive front-end options from AnanSettings

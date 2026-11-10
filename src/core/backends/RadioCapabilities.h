@@ -831,6 +831,12 @@ struct RadioCapabilities {
         QString requiredLicenseFeature;
     };
     std::optional<AutoAgcThresholdControl> autoAgcThresholdControl;
+    // Minimum cushion, in ms, the client keeps queued ahead of the PC
+    // speaker for this radio's main receive audio. A host-DSP radio hands
+    // over small, jittery blocks; with nothing queued every late block is a
+    // speaker underrun, heard as a tick (brick3-angelia). Absent: none,
+    // and the receive presentation sync alone sets the queue.
+    std::optional<int> receiveAudioCushionMs;
     // The gain the AGC-T knob (0..100) sets: offsetDb + dbPerStep * knob, both
     // as the AGC's maximum gain and, with AGC off, as its fixed gain. The AGC-T
     // tooltips show it. Absent: no mapping declared, and the tooltips show the

@@ -882,7 +882,12 @@ void AudioEngine::setReceivePresentationDelays(
     int kiwiDelayMs,
     const QString& externalKiwiDelaySourceId)
 {
-    const int flexDelay = qBound(0, flexDelayMs, 5000);
+    m_requestedFlexDelayMs = flexDelayMs;
+    m_requestedKiwiDelayMs = kiwiDelayMs;
+    m_requestedKiwiDelaySourceId = externalKiwiDelaySourceId;
+    // The radio's cushion is a floor under what the sync asks for.
+    const int flexDelay = std::max(qBound(0, flexDelayMs, 5000),
+                                   m_rxCushionFloorMs.load(std::memory_order_relaxed));
     const int kiwiDelay = qBound(0, kiwiDelayMs, 5000);
     const QString externalKiwiDelayId = externalKiwiDelaySourceId.trimmed();
     const int legacyKiwiDelay = externalKiwiDelayId.isEmpty() ? kiwiDelay : 0;
@@ -965,6 +970,16 @@ void AudioEngine::setReceivePresentationDelays(
         m_kiwiSdrPrebuffering.store(false, std::memory_order_relaxed);
     }
     updateRxBufferStats();
+}
+
+void AudioEngine::setReceiveCushionFloorMs(int ms)
+{
+    const int floor = qBound(0, ms, 500);
+    if (m_rxCushionFloorMs.exchange(floor, std::memory_order_relaxed) == floor) {
+        return;
+    }
+    setReceivePresentationDelays(m_requestedFlexDelayMs, m_requestedKiwiDelayMs,
+                                 m_requestedKiwiDelaySourceId);
 }
 
 void AudioEngine::resetReceivePresentationAudioBuffers()

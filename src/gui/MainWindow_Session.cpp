@@ -1120,6 +1120,19 @@ void MainWindow::wireRadioModel()
             this, [this](bool connected, const RadioCapabilities&) {
         updateExperimentalRadioSupport(connected);
     });
+    // The receive-audio cushion the radio declares, re-applied on every
+    // capability edge so a disconnect or another radio drops it
+    // (brick3-angelia).
+    connect(&m_radioModel, &RadioModel::capabilitiesChanged,
+            this, [this](bool connected, const RadioCapabilities& caps) {
+        if (!m_audio) {
+            return;
+        }
+        const int cushionMs = connected ? caps.receiveAudioCushionMs.value_or(0) : 0;
+        QMetaObject::invokeMethod(m_audio, [audio = m_audio, cushionMs] {
+            audio->setReceiveCushionFloorMs(cushionMs);
+        }, Qt::QueuedConnection);
+    });
     // A wake reconnect holds the experimental chrome without a timer. When the
     // wake ends with the radio still connected and unidentified (cancelled),
     // re-evaluate so the ordinary bounded fallback takes over.
