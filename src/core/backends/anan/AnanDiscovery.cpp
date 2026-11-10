@@ -239,14 +239,38 @@ bool AnanDiscovery::isRunning() const noexcept
 
 void AnanDiscovery::start(int intervalMs)
 {
+    if (m_sweepsHeld) {
+        m_heldIntervalMs = intervalMs;   // starts when the hold is released
+        return;
+    }
     // The timer starts even if sweepNow()'s bind fails: every sweep retries
     // it, so discovery recovers without a restart.
     m_timer->start(intervalMs);
     sweepNow();   // don't make the operator wait a full interval for the first sweep
 }
 
+void AnanDiscovery::setSweepsHeld(bool held)
+{
+    if (held == m_sweepsHeld)
+        return;
+    m_sweepsHeld = held;
+    if (held) {
+        m_heldIntervalMs = m_timer->isActive() ? m_timer->interval() : 0;
+        m_timer->stop();
+        return;
+    }
+    if (m_heldIntervalMs > 0) {
+        // The silence was ours, not the radios'.
+        for (Seen& seen : m_seen)
+            seen.missedSweeps = 0;
+        m_timer->start(m_heldIntervalMs);
+        sweepNow();
+    }
+}
+
 void AnanDiscovery::stop()
 {
+    m_heldIntervalMs = 0;
     if (m_timer)
         m_timer->stop();
     if (m_socket) {

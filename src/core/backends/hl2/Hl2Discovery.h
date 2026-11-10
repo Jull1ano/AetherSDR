@@ -82,6 +82,12 @@ public:
 
     [[nodiscard]] bool isRunning() const noexcept;
 
+    // Hold the sweeps while a connected radio asks for quiet
+    // (RadioCapabilities::quietDiscoveryWhileConnected): nothing is sent and
+    // nothing ages out, so every listed radio stays listed. Releasing the
+    // hold sweeps at once and resumes the cadence (brick3-angelia).
+    void setSweepsHeld(bool held);
+
     // Canonical "AA:BB:CC:DD:EE:FF" rendering of a discovery reply's MAC, which
     // IS RadioInfo::serial for this family. Shared so a directed (unicast)
     // probe — ConnectionPanel's connect-by-IP path — produces byte-identical
@@ -150,6 +156,8 @@ private:
     QList<QHostAddress> m_directedTargets;
     DiscoveryNotices m_notices;
     bool m_answered = false;       // an HL2 replied since the last sweep
+    bool m_sweepsHeld = false;     // see setSweepsHeld()
+    int m_heldIntervalMs = 0;      // cadence to resume; 0 = was not running
 };
 
 }  // namespace AetherSDR::hl2

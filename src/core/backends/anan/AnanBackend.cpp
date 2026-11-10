@@ -501,6 +501,9 @@ RadioCapabilities AnanBackend::capabilities() const
     // IQ (gaps up to 90 ms on a Brick3). With no reserve the speaker underran
     // 2322 times a minute; 100 ms covers the longest gap seen.
     c.receiveAudioCushionMs = 100;
+    // brick3-angelia: measured on the radio -- 40 discovery requests sent
+    // mid-stream gave 43 sequence gaps of ~50 IQ packets each.
+    c.quietDiscoveryWhileConnected = true;
     c.manufacturer = QStringLiteral("Apache Labs");
     c.model = QString::fromLatin1(anan::ananModelForBoard(m_discoveredBoardId));
     // The session takes its receive front-end options from AnanSettings

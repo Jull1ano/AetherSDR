@@ -1133,6 +1133,14 @@ void MainWindow::wireRadioModel()
             audio->setReceiveCushionFloorMs(cushionMs);
         }, Qt::QueuedConnection);
     });
+    // brick3-angelia: a radio that drops IQ on every discovery request gets
+    // no picker sweeps while it is connected; both sweeps reach UDP/1024.
+    connect(&m_radioModel, &RadioModel::capabilitiesChanged,
+            this, [this](bool connected, const RadioCapabilities& caps) {
+        const bool held = connected && caps.quietDiscoveryWhileConnected;
+        m_hl2Discovery.setSweepsHeld(held);
+        m_ananDiscovery.setSweepsHeld(held);
+    });
     // A wake reconnect holds the experimental chrome without a timer. When the
     // wake ends with the radio still connected and unidentified (cancelled),
     // re-evaluate so the ordinary bounded fallback takes over.

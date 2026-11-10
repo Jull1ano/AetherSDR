@@ -227,6 +227,8 @@ int main(int argc, char** argv)
               "Auto AGC-T is offered: this host tracks the noise floor (brick3-angelia)");
         check(c.receiveAudioCushionMs == 100,
               "a 100 ms receive-audio cushion is declared: the DSP hands over audio in clumps");
+        check(c.quietDiscoveryWhileConnected,
+              "no discovery sweeps while connected: each one costs a Brick3 ~60 ms of IQ");
         check(AnanBackend::autoAgcKnobFor(-101.0) == 59
                   && AnanBackend::autoAgcKnobFor(-200.0) == 100
                   && AnanBackend::autoAgcKnobFor(0.0) == 0,

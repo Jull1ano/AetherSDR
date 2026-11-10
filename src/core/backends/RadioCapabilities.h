@@ -837,6 +837,12 @@ struct RadioCapabilities {
     // speaker underrun, heard as a tick (brick3-angelia). Absent: none,
     // and the receive presentation sync alone sets the queue.
     std::optional<int> receiveAudioCushionMs;
+    // The client must not send radio discovery while this radio is connected.
+    // A Brick3 (ANAN-100D clone, P2 gateware 121) stops its IQ stream for
+    // ~60 ms on EVERY discovery request reaching UDP/1024, Protocol 1 or 2:
+    // the 5 s picker sweeps cost 1.5 % of the IQ, a tick each time
+    // (brick3-angelia). Thetis sends no discovery while it runs either.
+    bool quietDiscoveryWhileConnected = false;
     // The gain the AGC-T knob (0..100) sets: offsetDb + dbPerStep * knob, both
     // as the AGC's maximum gain and, with AGC off, as its fixed gain. The AGC-T
     // tooltips show it. Absent: no mapping declared, and the tooltips show the
