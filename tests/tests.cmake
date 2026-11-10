@@ -4863,6 +4863,12 @@ add_executable(fft_trace_smoothing_test tests/fft_trace_smoothing_test.cpp)
 target_include_directories(fft_trace_smoothing_test PRIVATE src)
 add_test(NAME fft_trace_smoothing_test COMMAND fft_trace_smoothing_test)
 
+# Band-aware receive: broadcast bands switch to AM with the band's step,
+# leaving restores the mode; steps remembered per band type and modulation.
+add_executable(broadcast_band_policy_test tests/broadcast_band_policy_test.cpp)
+target_include_directories(broadcast_band_policy_test PRIVATE src)
+add_test(NAME broadcast_band_policy_test COMMAND broadcast_band_policy_test)
+
 # FFT De-comb (cepstral true envelope) on a
 # synthetic 105/180 Hz voice comb: comb filled, outline and noise floor kept.
 add_executable(fft_trace_decomb_test tests/fft_trace_decomb_test.cpp)

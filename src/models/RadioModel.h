@@ -32,6 +32,7 @@
 #include <array>
 #include <optional>
 #include "SliceModel.h"
+#include "BroadcastBandPolicy.h"
 #include "MeterModel.h"
 #include "PanadapterModel.h"
 #include "PanBandTransitions.h"
@@ -865,6 +866,12 @@ public:
 
     QList<SliceModel*> slices() const { return m_slices; }
     SliceModel* slice(int id) const;
+    // brick3-angelia: band-aware receive (BroadcastBandPolicy.h) -- AM and
+    // the band's step inside broadcast bands, the previous mode outside, the
+    // step remembered per band type and modulation. Client-owned-step radios
+    // only (ANAN, HL2): a Flex owns its slice's step.
+    void setBroadcastBandAuto(bool on);
+    bool broadcastBandAuto() const { return m_broadcastBandAuto; }
     // The slice that transmits (IsTransmitSlice), or nullptr if none. Mirrors
     // FlexLib's TX-slice scan (CWX::getTXFrequency, CWX.cs:186) — keyer/CWX
     // targeting follows this slice, not the selected RX slice.
@@ -1853,6 +1860,10 @@ private:
     // The step rides the Tuning domain only where no command plane carries it.
     bool clientOwnsSliceStep() const;
     void restoreClientOwnedStep(const RestoredRadioState& state);
+    // brick3-angelia: see setBroadcastBandAuto().
+    bool broadcastBandAutoActive() const;
+    void applyBroadcastAction(SliceModel* s, const broadcast::Policy::Action& action);
+    void saveBroadcastSteps();
 
     // aetherd Gap B: build/destroy the backend for a radio family. The backend
     // follows the radio the operator picks in the connection manager, so these
@@ -2326,6 +2337,12 @@ private:
     // This radio's client-owned tuning step: restored at connect, seeded into
     // each new slice, and updated by any slice's step change. 0 = none.
     int         m_clientStepHz{0};
+    // brick3-angelia: see setBroadcastBandAuto(). Steps are app-wide
+    // (AppSettings "BroadcastBandSteps"); the transitions are per slice.
+    bool        m_broadcastBandAuto{true};
+    bool        m_broadcastStepsLoaded{false};
+    broadcast::StepTable m_broadcastSteps;
+    std::map<int, broadcast::Policy> m_broadcastPolicies;
     bool        m_lineoutMute{false};
     int         m_headphoneGain{50};
     bool        m_headphoneMute{false};

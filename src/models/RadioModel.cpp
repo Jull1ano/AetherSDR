@@ -664,6 +664,7 @@ void RadioModel::handRestoredStateToBackend()
     }
     m_backend->configureSettingsScope(settingsScope(), m_lastInfo.serialIdentity);
     m_clientStepHz = 0;   // never carry radio A's step onto radio B
+    m_broadcastPolicies.clear();   // a new session's first frequency only learns
     const RadioCapabilities caps = m_backend->capabilities();
     if (!RadioStateMemory::shouldEngage(caps)) {
         return;
@@ -1814,6 +1815,55 @@ void RadioModel::wireBackendReceiverState()
                 if (generation != m_backendReceiverGeneration || receiveCommandSource() != s
                     || m_backend->receiveControlPolicy() != ReceiveControlPolicy::Confirmed) { return; }
                 m_backend->setSliceRitOffset(id, hz);
+            });
+
+            // brick3-angelia: band-aware receive -- see setBroadcastBandAuto().
+            connect(s, &SliceModel::frequencyChanged, this, [this, s](double mhz) {
+                if (mhz <= 0.0 || !broadcastBandAutoActive()) {
+                    return;
+                }
+                if (!m_broadcastStepsLoaded) {
+                    m_broadcastStepsLoaded = true;
+                    m_broadcastSteps = broadcast::parseSteps(AppSettings::instance()
+                        .value(QStringLiteral("BroadcastBandSteps")).toString().toStdString());
+                }
+                broadcast::Policy& policy = m_broadcastPolicies[s->sliceId()];
+                const bool wasKnown = policy.known();
+                const std::string contextBefore = policy.context();
+                const broadcast::Policy::Action action = policy.onFrequency(
+                    mhz * 1e6, s->mode().toStdString(), s->stepHz(), m_broadcastSteps);
+                if (wasKnown && policy.context() != contextBefore) {
+                    saveBroadcastSteps();   // the place left keeps its step
+                }
+                if (wasKnown) {
+                    applyBroadcastAction(s, action);
+                }
+            });
+            connect(s, &SliceModel::modeChanged, this, [this, s](const QString& mode) {
+                if (!broadcastBandAutoActive()) {
+                    return;
+                }
+                const auto it = m_broadcastPolicies.find(s->sliceId());
+                if (it == m_broadcastPolicies.end()) {
+                    return;
+                }
+                const std::string contextBefore = it->second.context();
+                const broadcast::Policy::Action action = it->second.onMode(
+                    mode.toStdString(), s->stepHz(), m_broadcastSteps);
+                if (it->second.context() != contextBefore) {
+                    saveBroadcastSteps();
+                }
+                applyBroadcastAction(s, action);
+            });
+            connect(s, &SliceModel::stepChanged, this, [this, s](int hz) {
+                if (!broadcastBandAutoActive()) {
+                    return;
+                }
+                const auto it = m_broadcastPolicies.find(s->sliceId());
+                if (it != m_broadcastPolicies.end()
+                    && it->second.onStep(hz, m_broadcastSteps)) {
+                    saveBroadcastSteps();
+                }
             });
 
             // Tuning capture of the client-owned step, whatever moved it.
@@ -4404,6 +4454,54 @@ RadioCapabilities RadioModel::backendCapabilities() const
 }
 
 // Client-owned receive state; radio-owned requests stay on the backend route.
+
+// brick3-angelia: band-aware receive -- see BroadcastBandPolicy.h.
+void RadioModel::setBroadcastBandAuto(bool on)
+{
+    if (on == m_broadcastBandAuto) {
+        return;
+    }
+    m_broadcastBandAuto = on;
+    m_broadcastPolicies.clear();   // the next frequency only learns where each slice is
+}
+
+bool RadioModel::broadcastBandAutoActive() const
+{
+    return m_broadcastBandAuto && clientOwnsSliceStep();
+}
+
+void RadioModel::applyBroadcastAction(SliceModel* s,
+                                      const broadcast::Policy::Action& action)
+{
+    if (!action.mode && !action.stepHz) {
+        return;
+    }
+    // Queued: the frequency/mode signal can fire inside the slice's own
+    // status apply, and a mode request re-entering the backend from there
+    // would nest another apply on the same slice.
+    QPointer<SliceModel> slice(s);
+    QMetaObject::invokeMethod(this, [this, slice, action] {
+        if (!slice || !broadcastBandAutoActive()) {
+            return;
+        }
+        if (action.stepHz) {
+            slice->applyRecalledStepHz(*action.stepHz);
+        }
+        if (action.mode) {
+            slice->setMode(QString::fromStdString(*action.mode));
+        }
+    }, Qt::QueuedConnection);
+}
+
+void RadioModel::saveBroadcastSteps()
+{
+    const QString text = QString::fromStdString(broadcast::serializeSteps(m_broadcastSteps));
+    auto& settings = AppSettings::instance();
+    if (settings.value(QStringLiteral("BroadcastBandSteps")).toString() != text) {
+        settings.setValue(QStringLiteral("BroadcastBandSteps"), text);
+        settings.save();
+    }
+}
 
 bool RadioModel::applyClientOwnedSliceStep(int sliceId, int hz)
 {

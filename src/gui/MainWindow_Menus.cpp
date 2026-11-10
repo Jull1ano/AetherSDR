@@ -1391,6 +1391,23 @@ void MainWindow::buildMenuBar()
         AppSettings::instance().save();
     });
 
+    // brick3-angelia: band-aware receive (RadioModel::setBroadcastBandAuto).
+    auto* broadcastAutoAct = viewMenu->addAction("Broadcast Bands: Auto AM && Step");
+    broadcastAutoAct->setCheckable(true);
+    broadcastAutoAct->setToolTip(
+        "Tuning into a broadcast band switches to AM with a 9 kHz step on long "
+        "and medium wave, 5 kHz on the shortwave broadcast bands; tuning out "
+        "restores the previous mode. The last step is remembered per band type "
+        "and per mode. For radios this computer runs the DSP for (ANAN, HL2).");
+    broadcastAutoAct->setChecked(
+        AppSettings::instance().value("BroadcastBandAuto", "True").toString() == "True");
+    m_radioModel.setBroadcastBandAuto(broadcastAutoAct->isChecked());
+    connect(broadcastAutoAct, &QAction::toggled, this, [this](bool on) {
+        m_radioModel.setBroadcastBandAuto(on);
+        AppSettings::instance().setValue("BroadcastBandAuto", on ? "True" : "False");
+        AppSettings::instance().save();
+    });
+
     auto* panFollowVfoAct = viewMenu->addAction("Pan Follows VFO");
     panFollowVfoAct->setCheckable(true);
     panFollowVfoAct->setChecked(
