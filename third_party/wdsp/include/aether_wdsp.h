@@ -95,6 +95,14 @@ void SetRXAPanelGain1(int channel, double gain);
 // SSB/CW/digital that is the signal and its Hilbert transform, heard as a
 // phasey "fake stereo"); 0 = I copied to both ears (mono, Thetis's default).
 void SetRXAPanelBinaural(int channel, int bin);
+// EMNR -- Thetis's NR2 -- inside the RXA chain (emnr.c). Position 0 runs it
+// before the AGC, as Thetis does. Methods: gain 0 linear, 1 log, 2 gamma,
+// 3 trained; noise estimate 0 OSMS, 1 MMSE, 2 NSTAT.
+void SetRXAEMNRRun(int channel, int run);
+void SetRXAEMNRgainMethod(int channel, int method);
+void SetRXAEMNRnpeMethod(int channel, int method);
+void SetRXAEMNRaeRun(int channel, int run);
+void SetRXAEMNRPosition(int channel, int position);
 void SetRXABandpassFreqs(int channel, double lowHz, double highHz);
 // Canonical passband setter. RXASetPassband() is what both reference clients
 // (Thetis, pihpsdr) call: it sets the bandpass AND the SNBA output bandwidth

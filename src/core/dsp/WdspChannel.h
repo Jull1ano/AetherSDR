@@ -110,6 +110,17 @@ public:
         bool active = true;
         bool operator==(const ReceiveNotch&) const = default;
     };
+    // brick3-angelia: WDSP's own NR2 (EMNR, emnr.c), the one Thetis runs:
+    // inside the RXA chain before the AGC, at the DSP rate, FFT 4096 / 4.
+    // Same method numbering as SpectralNR's (gain 0 linear .. 3 trained;
+    // noise estimate 0 OSMS, 1 MMSE, 2 NSTAT).
+    struct Emnr
+    {
+        int gainMethod = 2;
+        int npeMethod = 0;
+        bool aeRun = true;
+        bool operator==(const Emnr&) const = default;
+    };
     struct AnalogReceiveDsp
     {
         std::vector<ReceiveNotch> trackingNotches;
@@ -146,6 +157,8 @@ public:
         // defaults. Never applied to WBFM, whose stereo decoder feeds the
         // same panel (brick3-angelia).
         std::optional<bool> rxBinaural;
+        // Receive EMNR (Thetis's NR2); engaged = running. See Emnr.
+        std::optional<Emnr> emnr;
         double filterLowHz = 150.0;
         double filterHighHz = 3000.0;
         int agcMode = 3;
@@ -436,6 +449,10 @@ public:
     // pushed whatever the kind. Guarded like setMode(); never from processIq().
     // Enabling flushes the stage being started.
     bool setNoiseBlanker(NoiseBlanker kind, int level, NoiseBlankerFill fill) noexcept;
+    // Receive EMNR on (engaged) or off, live. False when refused (transmit or
+    // WBFM channel, or a racing control call); the config keeps the last
+    // applied value (brick3-angelia).
+    bool setEmnr(const std::optional<Emnr>& emnr) noexcept;
     // Real-time-safe suspend for backends that clock the channel with silence
     // during TX. The blanker fires on magnitude > threshold * running average, so
     // zeros would decay the average and gate off the start of every RX period.

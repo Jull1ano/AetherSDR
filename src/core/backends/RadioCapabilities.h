@@ -845,6 +845,16 @@ struct RadioCapabilities {
     // Engaged = hold the sweeps; the record has no fields yet.
     struct QuietDiscoveryWhileConnected {};
     std::optional<QuietDiscoveryWhileConnected> quietDiscoveryWhileConnected;
+    // NR2 runs inside this radio's own receive DSP (WDSP EMNR, as Thetis
+    // runs it: before the AGC) instead of the client's SpectralNR. The client
+    // keeps its NR2 switch and gain/estimator/AE controls and sends them as
+    // invokeExtension(extensionNamespace, verb, {on, gainMethod, npeMethod,
+    // aeRun}) (brick3-angelia). Absent: NR2 is the client's.
+    struct HostNoiseReduction2 {
+        QString extensionNamespace;
+        QString verb;
+    };
+    std::optional<HostNoiseReduction2> hostNoiseReduction2;
     // The gain the AGC-T knob (0..100) sets: offsetDb + dbPerStep * knob, both
     // as the AGC's maximum gain and, with AGC off, as its fixed gain. The AGC-T
     // tooltips show it. Absent: no mapping declared, and the tooltips show the

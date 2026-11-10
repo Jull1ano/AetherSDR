@@ -96,6 +96,9 @@ public:
         int noiseBlankerLevel = 50;
         WdspChannel::NoiseBlankerFill noiseBlankerFill =
             WdspChannel::NoiseBlankerFill::Zero;
+        // brick3-angelia: WDSP's own NR2 (EMNR), Thetis's -- engaged = on.
+        // In Config for the same reason as the blanker.
+        std::optional<WdspChannel::Emnr> emnr;
     };
 
     // Synchronous convenience used by deterministic tests. Production first
@@ -163,6 +166,9 @@ public:
     // the swap.
     Q_INVOKABLE void setNoiseBlanker(WdspChannel::NoiseBlanker kind, int level,
                                      WdspChannel::NoiseBlankerFill fill);
+    // brick3-angelia: WDSP's NR2 (EMNR) on or off with its methods. Deferred
+    // like setNoiseBlanker() while a rebuild is in flight.
+    void setNr2(bool on, int gainMethod, int npeMethod, bool aeRun);
     struct NoiseBlankerState {
         bool hasChain = false;
         WdspChannel::NoiseBlanker kind = WdspChannel::NoiseBlanker::Off;

@@ -323,6 +323,19 @@ void applyRxAgc(int channel, int mode, double topDb, int slopeDb, double fixedDb
     }
 }
 
+// brick3-angelia: WDSP's own NR2 (EMNR), before the AGC as Thetis runs it.
+// Caller holds g_setupMutex.
+void applyRxEmnr(int channel, const std::optional<WdspChannel::Emnr>& emnr)
+{
+    if (emnr) {
+        SetRXAEMNRgainMethod(channel, std::clamp(emnr->gainMethod, 0, 3));
+        SetRXAEMNRnpeMethod(channel, std::clamp(emnr->npeMethod, 0, 2));
+        SetRXAEMNRaeRun(channel, emnr->aeRun ? 1 : 0);
+        SetRXAEMNRPosition(channel, 0);
+    }
+    SetRXAEMNRRun(channel, emnr ? 1 : 0);
+}
+
 }  // namespace
 
 std::unique_ptr<WdspChannel> WdspChannel::create(const Config& config,
@@ -1545,6 +1558,23 @@ void WdspChannel::closeNoiseBlanker() noexcept
     m_nbOpen = false;
 }
 
+bool WdspChannel::setEmnr(const std::optional<Emnr>& emnr) noexcept
+{
+    if (m_config.direction != Direction::Receive || m_config.wbfmReceive) {
+        return false;
+    }
+    if (!beginControlOperation()) {
+        return false;
+    }
+    {
+        const std::scoped_lock setupLock(g_setupMutex);
+        applyRxEmnr(m_channelId, emnr);
+    }
+    m_config.emnr = emnr;
+    endControlOperation();
+    return true;
+}
+
 bool WdspChannel::setNoiseBlanker(NoiseBlanker kind, int level,
                                   NoiseBlankerFill fill) noexcept
 {
@@ -1668,6 +1698,10 @@ bool WdspChannel::open() noexcept
         SetRXASPCWBandwidth(m_channelId, m_config.apfBandwidthHz);
         SetRXASPCWGain(m_channelId, m_config.apfGain);
         SetRXASPCWRun(m_channelId, m_config.apfEnabled ? 1 : 0);
+        // brick3-angelia: close() frees the EMNR stage too; re-push it.
+        if (!m_config.wbfmReceive) {
+            applyRxEmnr(m_channelId, m_config.emnr);
+        }
         if (m_config.analogReceiveDsp) {
             const auto& receive = *m_config.analogReceiveDsp;
             // Bounded adaptation strength; the midpoint is RXA.c's default.

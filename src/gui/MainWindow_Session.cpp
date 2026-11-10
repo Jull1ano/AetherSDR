@@ -1133,6 +1133,35 @@ void MainWindow::wireRadioModel()
             audio->setReceiveCushionFloorMs(cushionMs);
         }, Qt::QueuedConnection);
     });
+    // brick3-angelia: a radio that runs NR2 in its own receive DSP (WDSP's
+    // EMNR on an ANAN, as Thetis) takes the NR2 switch and its methods; the
+    // client's SpectralNR stands aside while it is connected.
+    connect(&m_radioModel, &RadioModel::capabilitiesChanged,
+            this, [this](bool connected, const RadioCapabilities& caps) {
+        if (!m_audio) {
+            return;
+        }
+        const bool hostNr2 = connected && caps.hostNoiseReduction2.has_value();
+        QMetaObject::invokeMethod(m_audio, [audio = m_audio, hostNr2] {
+            audio->setHostNr2Available(hostNr2);
+        }, Qt::QueuedConnection);
+    });
+    if (m_audio) {
+        connect(m_audio, &AudioEngine::hostNr2Changed, this,
+                [this](bool on, int gainMethod, int npeMethod, bool aeRun) {
+            const RadioCapabilities caps = m_radioModel.backendCapabilities();
+            if (!m_radioModel.isConnected() || !caps.hostNoiseReduction2) {
+                return;
+            }
+            m_radioModel.invokeBackendExtension(
+                caps.hostNoiseReduction2->extensionNamespace,
+                caps.hostNoiseReduction2->verb, 0,
+                QVariantMap{{QStringLiteral("on"), on},
+                            {QStringLiteral("gainMethod"), gainMethod},
+                            {QStringLiteral("npeMethod"), npeMethod},
+                            {QStringLiteral("aeRun"), aeRun}});
+        }, Qt::QueuedConnection);
+    }
     // brick3-angelia: a radio that drops IQ on every discovery request gets
     // no picker sweeps while it is connected; both sweeps reach UDP/1024.
     connect(&m_radioModel, &RadioModel::capabilitiesChanged,

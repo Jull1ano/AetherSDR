@@ -7818,10 +7818,61 @@ SpectralNR::WisdomResult AudioEngine::generateWisdom(
     return result;
 }
 
+void AudioEngine::setHostNr2Available(bool available)
+{
+    if (available == m_hostNr2Available.load())
+        return;
+    if (available) {
+        // Hand a running client NR2 over to the radio.
+        const bool wasClient = m_nr2Enabled.load();
+        if (wasClient)
+            setNr2Enabled(false);
+        m_hostNr2Available = true;
+        if (wasClient)
+            setNr2Enabled(true);
+    } else {
+        // And back: the next radio gets the client's NR2 if it was on.
+        const bool wasHost = m_hostNr2Enabled.exchange(false);
+        m_hostNr2Available = false;
+        if (wasHost)
+            setNr2Enabled(true);
+    }
+}
+
+void AudioEngine::emitHostNr2()
+{
+    emit hostNr2Changed(m_hostNr2Enabled.load(), m_hostNr2GainMethod,
+                        m_hostNr2NpeMethod, m_hostNr2AeRun);
+}
+
 void AudioEngine::setNr2Enabled(bool on)
 {
     if (on && m_rxBypassActive) {
         emit nr2EnabledChanged(false);
+        return;
+    }
+    if (m_hostNr2Available.load()) {
+        // brick3-angelia: the radio runs NR2 -- see setHostNr2Available().
+        if (m_hostNr2Enabled.load() == on)
+            return;
+        if (on) {
+            // The NR modes stay mutually exclusive, wherever NR2 runs.
+            if (m_rn2Enabled)  setRn2Enabled(false);
+            if (m_nr4Enabled)  setNr4Enabled(false);
+            if (m_dfnrEnabled) setDfnrEnabled(false);
+            if (m_nvAfxEnabled) setNvAfxEnabled(false);
+            if (m_nnrEnabled)  setNnrEnabled(false);
+            if (m_mnrEnabled)  setMnrEnabled(false);
+            const Nr2SettingsModel::Config config = Nr2SettingsModel::instance().config();
+            m_hostNr2GainMethod = config.gainMethod;
+            m_hostNr2NpeMethod = config.npeMethod;
+            m_hostNr2AeRun = config.aeFilter;
+        }
+        m_hostNr2Enabled = on;
+        qCDebug(lcAudio) << "AudioEngine: NR2" << (on ? "enabled" : "disabled")
+                         << "in the radio's receive DSP";
+        emitHostNr2();
+        emit nr2EnabledChanged(on);
         return;
     }
     if (m_nr2Enabled == on) return;
@@ -7963,6 +8014,9 @@ void AudioEngine::setNr2GainSmooth(float v)
 
 void AudioEngine::setNr2GainMethod(int m)
 {
+    m_hostNr2GainMethod = m;
+    if (m_hostNr2Enabled.load())
+        emitHostNr2();
     std::lock_guard<std::recursive_mutex> lock(m_dspMutex);
     if (m_nr2) m_nr2->setGainMethod(m);
     if (m_kiwiSdrNr2) m_kiwiSdrNr2->setGainMethod(m);
@@ -7975,6 +8029,9 @@ void AudioEngine::setNr2GainMethod(int m)
 
 void AudioEngine::setNr2NpeMethod(int m)
 {
+    m_hostNr2NpeMethod = m;
+    if (m_hostNr2Enabled.load())
+        emitHostNr2();
     std::lock_guard<std::recursive_mutex> lock(m_dspMutex);
     if (m_nr2) m_nr2->setNpeMethod(m);
     if (m_kiwiSdrNr2) m_kiwiSdrNr2->setNpeMethod(m);
@@ -8030,6 +8087,9 @@ QJsonObject AudioEngine::nr2RuntimeDiagnostics() const
 
 void AudioEngine::setNr2AeFilter(bool on)
 {
+    m_hostNr2AeRun = on;
+    if (m_hostNr2Enabled.load())
+        emitHostNr2();
     std::lock_guard<std::recursive_mutex> lock(m_dspMutex);
     if (m_nr2) m_nr2->setAeFilter(on);
     if (m_kiwiSdrNr2) m_kiwiSdrNr2->setAeFilter(on);
@@ -8093,7 +8153,7 @@ void AudioEngine::setNr4Enabled(bool on)
     std::unique_lock<std::recursive_mutex> lock(m_dspMutex);
     ++m_dspConfigurationGeneration;
     if (on) {
-        if (m_nr2Enabled)  setNr2Enabled(false);
+        if (nr2Enabled())  setNr2Enabled(false);
         if (m_rn2Enabled)  setRn2Enabled(false);
         if (m_dfnrEnabled) setDfnrEnabled(false);
         if (m_nvAfxEnabled) setNvAfxEnabled(false);
@@ -8254,7 +8314,7 @@ void AudioEngine::setMnrEnabled(bool on)
 #ifdef __APPLE__
     if (on) {
         // Disable all other noise-reduction modes — they're mutually exclusive
-        if (m_nr2Enabled)  setNr2Enabled(false);
+        if (nr2Enabled())  setNr2Enabled(false);
         if (m_rn2Enabled)  setRn2Enabled(false);
         if (m_nr4Enabled)  setNr4Enabled(false);
         if (m_dfnrEnabled) setDfnrEnabled(false);
@@ -8325,7 +8385,7 @@ void AudioEngine::setRn2Enabled(bool on)
     ++m_dspConfigurationGeneration;
     if (on) {
         // Disable all other NR modes — they're mutually exclusive
-        if (m_nr2Enabled)  setNr2Enabled(false);
+        if (nr2Enabled())  setNr2Enabled(false);
         if (m_nr4Enabled)  setNr4Enabled(false);
         if (m_dfnrEnabled) setDfnrEnabled(false);
         if (m_nvAfxEnabled) setNvAfxEnabled(false);
@@ -8373,7 +8433,7 @@ void AudioEngine::setNnrEnabled(bool on)
     ++m_dspConfigurationGeneration;
     if (on) {
         // Disable all other NR modes — they're mutually exclusive
-        if (m_nr2Enabled)  setNr2Enabled(false);
+        if (nr2Enabled())  setNr2Enabled(false);
         if (m_rn2Enabled)  setRn2Enabled(false);
         if (m_nr4Enabled)  setNr4Enabled(false);
         if (m_dfnrEnabled) setDfnrEnabled(false);
@@ -8554,7 +8614,7 @@ void AudioEngine::setDfnrEnabled(bool on)
     ++m_dspConfigurationGeneration;
     if (on) {
         // Mutual exclusion with all other NR modes
-        if (m_nr2Enabled)  setNr2Enabled(false);
+        if (nr2Enabled())  setNr2Enabled(false);
         if (m_rn2Enabled)  setRn2Enabled(false);
         if (m_nr4Enabled)  setNr4Enabled(false);
         if (m_mnrEnabled)  setMnrEnabled(false);
@@ -8646,7 +8706,7 @@ void AudioEngine::setNvAfxEnabled(bool on)
     ++m_dspConfigurationGeneration;
     if (on) {
         // Mutual exclusion with all other NR modes
-        if (m_nr2Enabled)  setNr2Enabled(false);
+        if (nr2Enabled())  setNr2Enabled(false);
         if (m_rn2Enabled)  setRn2Enabled(false);
         if (m_nr4Enabled)  setNr4Enabled(false);
         if (m_dfnrEnabled) setDfnrEnabled(false);

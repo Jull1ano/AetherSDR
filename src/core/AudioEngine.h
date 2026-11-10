@@ -344,7 +344,12 @@ public:
     // Client-side NR2 (spectral noise reduction)
     // Q_INVOKABLE: called from main thread, runs on audio worker thread (#502)
     Q_INVOKABLE void setNr2Enabled(bool on);
-    bool nr2Enabled() const { return m_nr2Enabled.load(); }
+    bool nr2Enabled() const { return m_nr2Enabled.load() || m_hostNr2Enabled.load(); }
+    // brick3-angelia: the connected radio runs NR2 in its own receive DSP
+    // (RadioCapabilities::hostNoiseReduction2 -- WDSP's EMNR, as Thetis).
+    // The NR2 switch and its gain/estimator/AE controls stay here and
+    // hostNr2Changed() carries them to the radio; SpectralNR does not run.
+    Q_INVOKABLE void setHostNr2Available(bool available);
     // NR2 user-adjustable parameters (thread-safe via atomic in SpectralNR)
     void setNr2GainMax(float v);
     void setNr2GainFloor(float v);
@@ -788,6 +793,8 @@ signals:
     // changes (publishNrGainIfChanged()).
     void nrGainChanged(float gain, bool active);
     void nr2EnabledChanged(bool on);
+    // brick3-angelia: see setHostNr2Available().
+    void hostNr2Changed(bool on, int gainMethod, int npeMethod, bool aeRun);
     void nr4EnabledChanged(bool on);
     void mnrEnabledChanged(bool on);
     void rn2EnabledChanged(bool on);
@@ -1357,6 +1364,13 @@ private:
     std::unique_ptr<SpectralNR> m_nr2;
     std::unique_ptr<SpectralNR> m_kiwiSdrNr2;
     std::atomic<bool> m_nr2Enabled{false};
+    // brick3-angelia: see setHostNr2Available(). Methods mirror Nr2SettingsModel.
+    std::atomic<bool> m_hostNr2Available{false};
+    std::atomic<bool> m_hostNr2Enabled{false};
+    int m_hostNr2GainMethod{2};
+    int m_hostNr2NpeMethod{0};
+    bool m_hostNr2AeRun{true};
+    void emitHostNr2();
     // Set true while the connected MAIN source is the demo (SimBackend), whose
     // 128-sample frames need the original 256/2 NR2 geometry (see createNr2Filter).
     // This is scoped to the main filter only — real radios and Kiwi keep the

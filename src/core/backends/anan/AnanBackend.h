@@ -487,6 +487,9 @@ private:
     AetherSDR::NoiseBlankerKind m_nbKind = AetherSDR::NoiseBlankerKind::Off;
     int m_nbLevel = 50;
     AetherSDR::NoiseBlankerFill m_nbFill = AetherSDR::kDefaultNoiseBlankerFill;
+    // brick3-angelia: WDSP's NR2 (EMNR) as the client last asked for it
+    // ("anan" "nr2.set"); retained like the blanker. Engaged = on.
+    std::optional<WdspChannel::Emnr> m_nr2;
 
     // The receiver audio stage as last set; emitSliceState() publishes these.
     // Retained across rate changes and reconnects (like the blanker and AGC).

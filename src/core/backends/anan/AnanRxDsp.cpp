@@ -106,6 +106,7 @@ AnanRxDsp::RebuildResult AnanRxDsp::buildChannel(const Config& config)
     wc.noiseBlanker = config.noiseBlanker;
     wc.noiseBlankerLevel = config.noiseBlankerLevel;
     wc.noiseBlankerFill = config.noiseBlankerFill;
+    wc.emnr = config.emnr;
     // Unity, as Hl2RxDsp::kRxPanelGain: WDSP's RXA panel defaults to x4
     // (RXA.c create_panel, gain1 4.0), +12 dB past the AGC's own level. Left
     // at that default, band noise alone peaked at +8 dBFS on a Brick3 and
@@ -115,6 +116,12 @@ AnanRxDsp::RebuildResult AnanRxDsp::buildChannel(const Config& config)
     // the audio's Hilbert transform in the right ear: on a Brick3 recording
     // the ears correlated 0.000 in USB and LSB, heard as fake stereo.
     wc.rxBinaural = false;
+    // brick3-angelia: AGC slope 0, Thetis's default (the operator's own Thetis
+    // database: udDSPAGCSlope 0). WdspChannel's 35 (3.5 dB, pihpsdr) plays a
+    // signal near the threshold up to 3.5 dB under a strong one; offline on a
+    // Brick3 recording at AGC-T 100 it left speech 2.3 dB under Thetis (p95
+    // -9.6 vs -7.3 dBFS, peaks -2.3 vs -0.1); 0 matches Thetis to 0.1 dB.
+    wc.agcSlopeDb = 0;
     // filterTaps left at WdspChannel::Config's own default (2048): this
     // phase has no manual notch filter, so there is no narrow-notch floor to
     // widen it for (contrast Hl2RxDsp::kRxFilterTaps, which exists solely
@@ -230,6 +237,10 @@ void AnanRxDsp::installChannel(RebuildResult result)
                                          m_config.noiseBlankerFill)) {
         qCWarning(lcAnanRxDsp) << "noise blanker refused by the rebuilt channel";
     }
+    if (result.channel->config().emnr != m_config.emnr
+        && !result.channel->setEmnr(m_config.emnr)) {
+        qCWarning(lcAnanRxDsp) << "NR2 (EMNR) refused by the rebuilt channel";
+    }
     // The hold flag belongs to the channel, so a rebuild loses it. A rate
     // change swaps the channel while audio is muted for its settle window.
     result.channel->setNoiseBlankerHold(m_audioMuted);
@@ -332,6 +343,19 @@ void AnanRxDsp::setNoiseBlanker(WdspChannel::NoiseBlanker kind, int level,
                                << "refused by the channel";
     }
     publishNoiseBlankerState();
+}
+
+void AnanRxDsp::setNr2(bool on, int gainMethod, int npeMethod, bool aeRun)
+{
+    m_config.emnr = on
+        ? std::optional<WdspChannel::Emnr>(WdspChannel::Emnr{gainMethod, npeMethod, aeRun})
+        : std::nullopt;
+    if (!m_channel || m_rebuildInFlight)
+        return;
+    if (!m_channel->setEmnr(m_config.emnr)) {
+        qCWarning(lcAnanRxDsp) << "NR2 (EMNR)" << (on ? "on" : "off")
+                               << "refused by the channel";
+    }
 }
 
 void AnanRxDsp::publishNoiseBlankerState()

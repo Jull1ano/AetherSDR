@@ -504,6 +504,10 @@ RadioCapabilities AnanBackend::capabilities() const
     // brick3-angelia: measured on the radio -- 40 discovery requests sent
     // mid-stream gave 43 sequence gaps of ~50 IQ packets each.
     c.quietDiscoveryWhileConnected = RadioCapabilities::QuietDiscoveryWhileConnected{};
+    // brick3-angelia: NR2 is WDSP's own EMNR inside this receiver's chain
+    // ("anan" "nr2.set"), as Thetis runs it -- not the client's SpectralNR.
+    c.hostNoiseReduction2 = RadioCapabilities::HostNoiseReduction2{
+        QStringLiteral("anan"), QStringLiteral("nr2.set")};
     c.manufacturer = QStringLiteral("Apache Labs");
     c.model = QString::fromLatin1(anan::ananModelForBoard(m_discoveredBoardId));
     // The session takes its receive front-end options from AnanSettings
@@ -828,6 +832,7 @@ void AnanBackend::applyLiveRxState(AnanRxDsp::Config& config) const
     config.noiseBlanker = AetherSDR::toWdsp(m_nbKind);
     config.noiseBlankerLevel = m_nbLevel;
     config.noiseBlankerFill = AetherSDR::toWdsp(m_nbFill);
+    config.emnr = m_nr2;
 }
 
 void AnanBackend::beginDspSetup()
@@ -1698,6 +1703,27 @@ void AnanBackend::invokeExtension(const QString& ns, const QString& verb,
                                           Qt::QueuedConnection,
                                           Q_ARG(bool, m_pendingParams.speakerAmpMuted));
             }
+        }
+        if (requestId != 0) {
+            emit extensionResult(requestId, QVariantMap{{QStringLiteral("ok"), true}});
+        }
+        return;
+    }
+    if (ns == QLatin1String("anan") && verb == QLatin1String("nr2.set")) {
+        // brick3-angelia: WDSP's own NR2 (EMNR), Thetis's, before the AGC.
+        // The client's NR2 controls drive it (AudioEngine host-NR2 mode).
+        const QVariantMap fields = arg.toMap();
+        const bool on = fields.value(QStringLiteral("on")).toBool();
+        m_nr2 = on ? std::optional<WdspChannel::Emnr>(WdspChannel::Emnr{
+                         fields.value(QStringLiteral("gainMethod"), 2).toInt(),
+                         fields.value(QStringLiteral("npeMethod"), 0).toInt(),
+                         fields.value(QStringLiteral("aeRun"), true).toBool()})
+                   : std::nullopt;
+        if (m_dsp) {
+            const WdspChannel::Emnr e = m_nr2.value_or(WdspChannel::Emnr{});
+            QMetaObject::invokeMethod(m_dsp, [dsp = m_dsp, on, e] {
+                dsp->setNr2(on, e.gainMethod, e.npeMethod, e.aeRun);
+            }, Qt::QueuedConnection);
         }
         if (requestId != 0) {
             emit extensionResult(requestId, QVariantMap{{QStringLiteral("ok"), true}});
