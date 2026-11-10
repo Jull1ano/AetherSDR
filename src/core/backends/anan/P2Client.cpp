@@ -5,6 +5,7 @@
 #include <QStringList>
 #include <QTimer>
 #include <QUdpSocket>
+#include <QVariant>
 
 #include <algorithm>
 #include <cstddef>
