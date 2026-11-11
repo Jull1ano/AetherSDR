@@ -34,6 +34,9 @@ bool shortcutInputCaptured();
 // The std::function<bool()> guard handed to ShortcutManager: shortcuts
 // fire only when enabled and no input widget / lease captures keys.
 bool shortcutGuard();
+// brick3-angelia: the guard for always-on keys (ShortcutManager::setAlwaysOn):
+// only "not typing in a text field", not the Keyboard Shortcuts switch.
+bool alwaysOnShortcutGuard();
 
 // True while the lease holder is actively being dragged with the mouse.
 bool leaseHolderBusy(QWidget* w);

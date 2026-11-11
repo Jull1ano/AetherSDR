@@ -1201,6 +1201,12 @@ void TitleBar::setPcAudioLocked(bool locked)
     }
 }
 
+void TitleBar::togglePcAudio()
+{
+    if (m_pcBtn && m_pcBtn->isEnabled() && m_pcBtn->isVisible())
+        m_pcBtn->toggle();   // toggled() runs the click's own handler
+}
+
 void TitleBar::setPcAudioEnabled(bool on)
 {
     QSignalBlocker b(m_pcBtn);

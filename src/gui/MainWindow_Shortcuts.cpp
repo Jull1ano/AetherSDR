@@ -127,6 +127,10 @@ bool shortcutGuard() {
     return s_keyboardShortcutsEnabled && !shortcutInputCaptured();
 }
 
+bool alwaysOnShortcutGuard() {
+    return !shortcutInputCaptured();
+}
+
 // True while the lease holder is actively being dragged with the mouse, so the
 // lease must not time out mid-drag.  Covers both QAbstractSlider handles and the
 // MeterSlider (TCI/DAX) custom fader.
@@ -1493,14 +1497,25 @@ void MainWindow::registerShortcutActions()
             AetherSDR::SplitAudioOperatorEdit op;  // #2242: operator-origin
             if (s) s->setAudioGain(std::max(0.0f, s->audioGain() - 5.0f));
         });
+    // brick3-angelia: M is PC Audio Toggle (below) -- the mute the operator
+    // uses -- so this slice mute has no default key any more.
     m_shortcutManager.registerAction("mute_toggle", "Mute Toggle", "Audio",
-        QKeySequence(Qt::Key_M), [this]() {
+        QKeySequence(), [this]() {
             auto* s = activeSlice();
             AetherSDR::SplitAudioOperatorEdit op;  // #2242: operator-origin
             if (s) s->setAudioMute(!s->audioMute());
         });
     m_shortcutManager.registerAction("mute_all_slices_toggle", "Mute All Slices", "Audio",
         QKeySequence(), [this]() { onMuteAllSlicesToggle(); });
+    // brick3-angelia: the title bar's PC Audio button, which silences this
+    // computer's speaker. Always on: it keys nothing, while the Keyboard
+    // Shortcuts switch (off by default) would also arm PTT and MOX.
+    m_shortcutManager.registerAction("pc_audio_toggle", "PC Audio Toggle (mute)", "Audio",
+        QKeySequence(Qt::Key_M), [this]() {
+            if (m_titleBar)
+                m_titleBar->togglePcAudio();
+        });
+    m_shortcutManager.setAlwaysOn(QStringLiteral("pc_audio_toggle"), true);
     m_shortcutManager.registerAction("master_mute_toggle", "Master Mute Toggle", "Audio",
         QKeySequence(), [this]() {
             m_audio->setMuted(!m_audio->isMuted());
@@ -1870,10 +1885,23 @@ void MainWindow::registerShortcutActions()
         });
 
     // ── Load user bindings and create QShortcuts ────────────────────────
+    // brick3-angelia, once: an M the operator bound to Master Mute (which only
+    // works with the Keyboard Shortcuts switch on) moves to PC Audio Toggle.
+    {
+        auto& st = AppSettings::instance();
+        if (!st.contains(QStringLiteral("ShortcutPcAudioMigrated"))) {
+            if (st.value(QStringLiteral("Shortcut_master_mute_toggle")).toString()
+                == QLatin1String("M")) {
+                st.setValue(QStringLiteral("Shortcut_master_mute_toggle"), QString());
+            }
+            st.setValue(QStringLiteral("ShortcutPcAudioMigrated"), QStringLiteral("True"));
+            st.save();
+        }
+    }
     m_shortcutManager.loadBindings();
     s_keyboardShortcutsEnabled = m_keyboardShortcutsEnabled;
     syncOperatingShortcutsEnabled();
-    m_shortcutManager.rebuildShortcuts(this, shortcutGuard);
+    m_shortcutManager.rebuildShortcuts(this, shortcutGuard, alwaysOnShortcutGuard);
 
     m_sliderShortcutLeaseTimer.setSingleShot(true);
     connect(&m_sliderShortcutLeaseTimer, &QTimer::timeout, this,

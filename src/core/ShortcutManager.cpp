@@ -673,13 +673,16 @@ ShortcutImportResult ShortcutManager::importFromFile(const QString& path)
 }
 
 void ShortcutManager::rebuildShortcuts(QWidget* parent,
-                                       std::function<bool()> guardFn)
+                                       std::function<bool()> guardFn,
+                                       std::function<bool()> alwaysOnGuardFn)
 {
     // Destroy existing shortcuts
     qDeleteAll(m_shortcuts);
     m_shortcuts.clear();
     qDeleteAll(m_windowShortcuts);
     m_windowShortcuts.clear();
+    qDeleteAll(m_alwaysOnShortcuts);
+    m_alwaysOnShortcuts.clear();
 
     for (const auto& a : m_actions) {
         if (a.currentKey.isEmpty() || !a.handler) continue;
@@ -691,19 +694,33 @@ void ShortcutManager::rebuildShortcuts(QWidget* parent,
         // A disabled QShortcut is skipped by Qt's shortcut map, so its key
         // reaches the focused widget. An enabled one consumes the key even
         // when the guard below refuses it (#5483).
+        const bool alwaysOn = a.alwaysOn && !windowManagement && !a.keysTx && !a.txHandler;
         if (!windowManagement)
-            sc->setEnabled(m_shortcutsEnabled);
+            sc->setEnabled(alwaysOn || m_shortcutsEnabled);
         auto handler = a.handler;
-        connect(sc, &QShortcut::activated, this, [guardFn, handler, windowManagement]() {
-            if (!windowManagement && guardFn && !guardFn()) {
+        const auto guard = alwaysOn ? alwaysOnGuardFn : guardFn;
+        connect(sc, &QShortcut::activated, this, [guard, handler, windowManagement]() {
+            if (!windowManagement && guard && !guard()) {
                 return;
             }
             handler();
         });
         if (windowManagement) {
             m_windowShortcuts.append(sc);
+        } else if (alwaysOn) {
+            m_alwaysOnShortcuts.append(sc);   // not touched by setShortcutsEnabled()
         } else {
             m_shortcuts.append(sc);
+        }
+    }
+}
+
+void ShortcutManager::setAlwaysOn(const QString& id, bool on)
+{
+    for (auto& a : m_actions) {
+        if (a.id == id) {
+            a.alwaysOn = on && !a.keysTx && !a.txHandler;
+            return;
         }
     }
 }

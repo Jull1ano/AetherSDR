@@ -3745,6 +3745,42 @@ void MainWindow::rememberBandZoom(const QString& key, double bandwidthMhz)
     settings.save();
 }
 
+void MainWindow::rememberBandPosition(const QString& key, const BandPosition& position)
+{
+    if (key.isEmpty() || !(position.freqMhz > 0.0))
+        return;
+    auto& settings = AppSettings::instance();
+    QJsonObject all = QJsonDocument::fromJson(
+        settings.value(QStringLiteral("BandLastPosition")).toString().toUtf8()).object();
+    const QJsonObject entry{{QStringLiteral("f"), position.freqMhz},
+                            {QStringLiteral("m"), position.mode},
+                            {QStringLiteral("c"), position.centerMhz}};
+    if (all.value(key).toObject() == entry)
+        return;
+    all.insert(key, entry);
+    settings.setValue(QStringLiteral("BandLastPosition"),
+                      QString::fromUtf8(QJsonDocument(all).toJson(QJsonDocument::Compact)));
+    settings.save();
+}
+
+std::optional<MainWindow::BandPosition> MainWindow::rememberedBandPosition(const QString& key) const
+{
+    const QJsonObject entry = QJsonDocument::fromJson(
+        AppSettings::instance().value(QStringLiteral("BandLastPosition")).toString().toUtf8())
+        .object().value(key).toObject();
+    BandPosition p;
+    p.freqMhz = entry.value(QStringLiteral("f")).toDouble(0.0);
+    p.mode = entry.value(QStringLiteral("m")).toString();
+    p.centerMhz = entry.value(QStringLiteral("c")).toDouble(0.0);
+    // Only a position that still belongs to this band (a stale or foreign
+    // entry falls back to the button's defaults).
+    if (!std::isfinite(p.freqMhz) || p.freqMhz <= 0.0 || bandZoomKeyForMhz(p.freqMhz) != key)
+        return std::nullopt;
+    if (!std::isfinite(p.centerMhz) || p.centerMhz <= 0.0)
+        p.centerMhz = p.freqMhz;
+    return p;
+}
+
 double MainWindow::rememberedBandZoom(const QString& key) const
 {
     const QJsonObject zooms = QJsonDocument::fromJson(
@@ -3798,35 +3834,54 @@ void MainWindow::selectBand(const QString& panId, const QString& bandName, doubl
         // left keeps the span it has now, the band being opened gets its own.
         const QString leavingZoomKey = bandZoomKeyForMhz(s->frequency());
         const QString targetZoomKey = bandZoomKeyForMhz(freqMhz);
-        if (PanadapterModel* pan = m_radioModel.panadapter(panId);
-            pan && pan->bandwidthMhz() > 0.0) {
+        PanadapterModel* pan = m_radioModel.panadapter(panId);
+        if (pan && pan->bandwidthMhz() > 0.0) {
             rememberBandZoom(leavingZoomKey, pan->bandwidthMhz());
         }
+        // ...and so are the VFO, mode and pan centre: the band being left
+        // keeps them, the band being opened returns to its own.
+        rememberBandPosition(leavingZoomKey,
+                             BandPosition{s->frequency(), s->mode(),
+                                          pan ? pan->centerMhz() : s->frequency()});
         const double targetZoomMhz = rememberedBandZoom(targetZoomKey);
+        double targetMhz = freqMhz;
+        QString targetMode = mode;
+        double targetCenterMhz = freqMhz;
+        if (const auto back = rememberedBandPosition(targetZoomKey)) {
+            targetMhz = back->freqMhz;
+            if (!back->mode.isEmpty())
+                targetMode = back->mode;
+            targetCenterMhz = back->centerMhz;
+            // A centre that would leave the VFO off screen centres on it.
+            const double halfSpan = (targetZoomMhz > 0.0 ? targetZoomMhz
+                                     : pan ? pan->bandwidthMhz() : 0.0) / 2.0;
+            if (halfSpan > 0.0 && std::abs(targetCenterMhz - targetMhz) > halfSpan)
+                targetCenterMhz = targetMhz;
+        }
         m_bandSettings.setCurrentBand(bandName);
         // brick3-angelia: the button's mode is the operator's choice; the
         // broadcast-band policy keeps it and only follows with the step.
-        if (!mode.isEmpty())
+        if (!targetMode.isEmpty())
             m_radioModel.noteOperatorChosenMode(s->sliceId());
         // MODE FIRST, then frequency. The backend adopts a mode-appropriate
         // passband on a mode CHANGE (Hl2Backend::setSliceMode), and the
         // frequency move is what re-selects the companion filter board — so
         // this order leaves both the passband and the band filter settled
         // for the band being arrived at, not the one being left.
-        if (!mode.isEmpty())
-            s->setMode(mode);
-        s->setFrequency(freqMhz);
+        if (!targetMode.isEmpty())
+            s->setMode(targetMode);
+        s->setFrequency(targetMhz);
         // Centre the window on the new band. Without this the panadapter
         // keeps the old band's NCO until the tune happens to fall outside
         // the usable passband, so a band change could leave the trace
         // centred a whole band away from the slice that just moved.
-        m_radioModel.requestPanCenter(panId, freqMhz,
+        m_radioModel.requestPanCenter(panId, targetCenterMhz,
                                       targetZoomMhz > 0.0 ? targetZoomMhz : -1.0);
         qCDebug(lcProtocol).noquote().nospace()
             << "MainWindow: band switch (no radio band stack) band=" << bandName
             << " pan=" << panId
-            << " freq_mhz=" << QString::number(freqMhz, 'f', 6)
-            << " mode=" << mode;
+            << " freq_mhz=" << QString::number(targetMhz, 'f', 6)
+            << " mode=" << targetMode;
         return;
     }
 

@@ -57,6 +57,8 @@ public:
     void setMenuBar(QMenuBar* mb);
 
     void setPcAudioEnabled(bool on);
+    // brick3-angelia: what a click on PC Audio does (the M shortcut).
+    void togglePcAudio();
     // Lock PC audio on. A host-modulating backend (HL2) plays and captures all
     // of its audio locally, so turning PC audio off leaves the operator deaf and
     // mute with no indication why — there is no radio-side audio path to fall

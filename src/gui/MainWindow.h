@@ -539,6 +539,15 @@ private:
     static QString bandZoomKeyForMhz(double mhz);
     void rememberBandZoom(const QString& key, double bandwidthMhz);
     double rememberedBandZoom(const QString& key) const;
+    // brick3-angelia: where each band was left -- VFO, mode and pan centre --
+    // so a band button returns there (AppSettings "BandLastPosition").
+    struct BandPosition {
+        double freqMhz{0.0};
+        QString mode;
+        double centerMhz{0.0};
+    };
+    void rememberBandPosition(const QString& key, const BandPosition& position);
+    std::optional<BandPosition> rememberedBandPosition(const QString& key) const;
     // Lock / SWR-sweep guards shared by every tune source.  Returns true if the
     // tune must be blocked (and, for a locked active slice, restores the VFO
     // readout).  Lets the edge-pan tune path — which bypasses applyTuneRequest

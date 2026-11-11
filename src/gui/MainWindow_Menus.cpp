@@ -672,7 +672,7 @@ void MainWindow::buildMenuBar()
             before.insert(a.id, a.currentKey);
         ShortcutDialog dlg(&m_shortcutManager, this);
         dlg.exec();
-        m_shortcutManager.rebuildShortcuts(this, shortcutGuard);
+        m_shortcutManager.rebuildShortcuts(this, shortcutGuard, alwaysOnShortcutGuard);
         bool assigned = false;
         for (const auto& a : m_shortcutManager.actions()) {
             if (!a.currentKey.isEmpty() && before.value(a.id) != a.currentKey) {

@@ -69,6 +69,10 @@ public:
         TxController::Activity txActivity{TxController::Activity::Mox};
         std::function<void(const TxController::Input&)> txHandler;
         ShortcutPolicy policy{ShortcutPolicy::Operating};
+        // brick3-angelia: enabled even while the Keyboard Shortcuts switch is
+        // off -- for a key that keys nothing (setAlwaysOn()). Still a
+        // main-window shortcut behind the guard, unlike WindowManagement.
+        bool alwaysOn{false};
     };
 
     explicit ShortcutManager(QObject* parent = nullptr);
@@ -82,6 +86,9 @@ public:
                         bool autoRepeat = false,
                         bool keysTx = false,
                         ShortcutPolicy policy = ShortcutPolicy::Operating);
+    // brick3-angelia: see Action::alwaysOn. Refused for an action that keys
+    // the transmitter. Call before rebuildShortcuts().
+    void setAlwaysOn(const QString& id, bool on);
 
     // Binding management
     void setBinding(const QString& actionId, const QKeySequence& key);
@@ -108,8 +115,11 @@ public:
     // Operating actions are window-scoped and consult guardFn. WindowManagement
     // actions are application-scoped and remain available while operating input
     // is disabled/captured. TX actions always retain the operating policy.
+    // brick3-angelia: alwaysOnGuardFn guards Action::alwaysOn keys instead of
+    // guardFn (which also checks the Keyboard Shortcuts switch).
     void rebuildShortcuts(QWidget* parent,
-                          std::function<bool()> guardFn = nullptr);
+                          std::function<bool()> guardFn = nullptr,
+                          std::function<bool()> alwaysOnGuardFn = nullptr);
 
     // Enable or disable the operating QShortcuts, so their keys reach the
     // focused widget (a slider's arrows, or every bound key with keyboard
@@ -143,6 +153,7 @@ private:
     QVector<Action> m_actions;
     QVector<QShortcut*> m_shortcuts;
     QVector<QShortcut*> m_windowShortcuts;
+    QVector<QShortcut*> m_alwaysOnShortcuts;   // brick3-angelia: Action::alwaysOn
     bool m_shortcutsEnabled{true};
 };
 
