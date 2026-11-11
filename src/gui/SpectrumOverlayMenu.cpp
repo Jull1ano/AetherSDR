@@ -2038,11 +2038,9 @@ void SpectrumOverlayMenu::buildDisplayPanel()
                         "The figure in brackets is the width of one FFT bin at the "
                         "current rate: zooming in further than that shows no more "
                         "detail.\n"
-                        "A size not used before has to be prepared once, which can "
-                        "take minutes for the largest ones; the spectrum keeps "
-                        "running meanwhile, mode and filter changes wait for it, "
-                        "and the audio drops out for a quarter of a second when it "
-                        "switches."));
+                        "A change takes effect at once; the trace needs one FFT's "
+                        "worth of new samples to fill in (under a second, longest "
+                        "for the largest sizes at low rates)."));
         makeComboRow(tr("Window:"), m_fftWindowLbl, m_fftWindowCmb, "displayFftWindowCombo",
                      tr("The FFT window. Kaiser (the default) and Blackman-Harris 7 "
                         "keep strong signals from smearing into their neighbours; "
@@ -2060,6 +2058,44 @@ void SpectrumOverlayMenu::buildDisplayPanel()
                 [this](int idx) {
             emit hostFftWindowChanged(m_fftWindowCmb->itemData(idx).toInt());
         });
+    }
+
+    // brick3-angelia: how the trace moves. A point rises with the Attack time
+    // and falls with the Decay time, after FFT AVG: a short attack with a
+    // longer decay lets a signal come up at once and sink back gently. Hidden
+    // until MainWindow says the analyzer has them (setHostBallistics).
+    makeRow(tr("Attack:"), 0, 100, 0, m_attackSlider, m_attackLabel, &m_attackTitle);
+    m_attackSlider->setObjectName("displayAttackSlider");
+    m_attackSlider->setAccessibleName(tr("Spectrum attack time"));
+    m_attackSlider->setToolTip(
+        tr("How fast the trace RISES to a stronger signal, as a time (10 ms steps). "
+           "Short is lively; Off follows at once.\n"
+           "Works after FFT AVG. For a smooth, medium-speed trace try FFT AVG "
+           "about 100 ms, Attack 70 ms, Decay 260 ms."));
+    m_attackSlider->setAccessibleDescription(
+        tr("How fast the spectrum trace rises, in milliseconds. Zero is off."));
+    m_attackLabel->setText(ballisticsText(0));
+    connect(m_attackSlider, &QSlider::valueChanged, this, [this](int v) {
+        m_attackLabel->setText(ballisticsText(v));
+        emit hostAttackChanged(v * kBallisticsStepMs);
+    });
+    makeRow(tr("Decay:"), 0, 100, 0, m_decaySlider, m_decayLabel, &m_decayTitle);
+    m_decaySlider->setObjectName("displayDecaySlider");
+    m_decaySlider->setAccessibleName(tr("Spectrum decay time"));
+    m_decaySlider->setToolTip(
+        tr("How fast the trace FALLS back when a signal drops, as a time (10 ms "
+           "steps). Longer makes the trace sink gently; Off follows at once."));
+    m_decaySlider->setAccessibleDescription(
+        tr("How fast the spectrum trace falls, in milliseconds. Zero is off."));
+    m_decayLabel->setText(ballisticsText(0));
+    connect(m_decaySlider, &QSlider::valueChanged, this, [this](int v) {
+        m_decayLabel->setText(ballisticsText(v));
+        emit hostDecayChanged(v * kBallisticsStepMs);
+    });
+    for (QWidget* w : {static_cast<QWidget*>(m_attackTitle), static_cast<QWidget*>(m_attackSlider),
+                       static_cast<QWidget*>(m_attackLabel), static_cast<QWidget*>(m_decayTitle),
+                       static_cast<QWidget*>(m_decaySlider), static_cast<QWidget*>(m_decayLabel)}) {
+        w->hide();
     }
 
     // Smooth — display-only smoothing across frequency, in linear power (the
@@ -2813,6 +2849,31 @@ void SpectrumOverlayMenu::applyAutoBlackMode(int mode, bool emitSignals)
         if (autoOn) emit wfAutoBlackOffsetChanged(m_blackAutoOffsetValue);
         else        emit wfBlackLevelChanged(m_blackManualValue);
     }
+}
+
+QString SpectrumOverlayMenu::ballisticsText(int steps)
+{
+    return steps <= 0 ? tr("Off") : tr("%1 ms").arg(steps * kBallisticsStepMs);
+}
+
+void SpectrumOverlayMenu::setHostBallistics(int attackMs, int decayMs)
+{
+    if (!m_attackSlider || !m_decaySlider)
+        return;
+    const bool offered = attackMs >= 0 && decayMs >= 0;
+    for (QWidget* w : {static_cast<QWidget*>(m_attackTitle), static_cast<QWidget*>(m_attackSlider),
+                       static_cast<QWidget*>(m_attackLabel), static_cast<QWidget*>(m_decayTitle),
+                       static_cast<QWidget*>(m_decaySlider), static_cast<QWidget*>(m_decayLabel)}) {
+        w->setVisible(offered);
+    }
+    if (!offered)
+        return;
+    const QSignalBlocker blockAttack(m_attackSlider);
+    const QSignalBlocker blockDecay(m_decaySlider);
+    m_attackSlider->setValue(attackMs / kBallisticsStepMs);
+    m_decaySlider->setValue(decayMs / kBallisticsStepMs);
+    m_attackLabel->setText(ballisticsText(m_attackSlider->value()));
+    m_decayLabel->setText(ballisticsText(m_decaySlider->value()));
 }
 
 QString SpectrumOverlayMenu::averageText(int steps) const

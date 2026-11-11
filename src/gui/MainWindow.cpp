@@ -5582,6 +5582,13 @@ void MainWindow::buildUI()
             // a refused switch must not leave a button lit.
             QTimer::singleShot(400, this, [this] { refreshTitleDspStrip(); });
         });
+        // Right-click on a noise reduction: its settings page in AetherRX.
+        connect(strip, &TitleDspStrip::settingsRequested, this, [this](const QString& id) {
+            if (!TitleDspStrip::clientNrIds().contains(id))
+                return;
+            if (auto* dlg = ensureAetherRxDialog())
+                dlg->selectTab(id);
+        });
         if (m_audio) {
             auto syncNr = [this] {
                 if (auto* s = m_titleBar ? m_titleBar->dspStrip() : nullptr)

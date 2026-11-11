@@ -31,15 +31,15 @@ struct SlotDef {
 // free (a manual notch belongs there once this radio has one).
 constexpr SlotDef kSlots[] = {
     {"NB", "Noise blanker on or off, for the active receiver."},
-    {"NR2", "NR2 noise reduction on or off. AetherRX opens its settings."},
-    {"NR4", "NR4 noise reduction on or off. AetherRX opens its settings."},
-    {"MNR", "MNR noise reduction on or off. AetherRX opens its settings."},
-    {"DFNR", "DFNR noise reduction on or off. AetherRX opens its settings."},
+    {"NR2", "NR2 noise reduction on or off. Right-click opens its settings."},
+    {"NR4", "NR4 noise reduction on or off. Right-click opens its settings."},
+    {"MNR", "MNR noise reduction on or off. Right-click opens its settings."},
+    {"DFNR", "DFNR noise reduction on or off. Right-click opens its settings."},
     {"ANF", "Automatic notch filter on or off, for the active receiver: "
             "removes steady carriers and heterodynes from the audio."},
-    {"RN2", "RN2 noise reduction on or off. AetherRX opens its settings."},
-    {"BNR", "BNR noise reduction on or off. AetherRX opens its settings."},
-    {"NNR", "NNR noise reduction on or off. AetherRX opens its settings."},
+    {"RN2", "RN2 noise reduction on or off. Right-click opens its settings."},
+    {"BNR", "BNR noise reduction on or off. Right-click opens its settings."},
+    {"NNR", "NNR noise reduction on or off. Right-click opens its settings."},
 };
 
 }  // namespace
@@ -85,6 +85,11 @@ TitleDspStrip::TitleDspStrip(QWidget* parent) : QWidget(parent)
         b->setToolTip(tip);
         connect(b, &QPushButton::clicked, this, [this, id](bool on) {
             emit toggled(id, on);
+        });
+        // Right-click: this switch's settings, where it has any.
+        b->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(b, &QWidget::customContextMenuRequested, this, [this, id](const QPoint&) {
+            emit settingsRequested(id);
         });
         grid->addWidget(b, index / kColumns, index % kColumns);
         m_slots.append({id, b, tip});

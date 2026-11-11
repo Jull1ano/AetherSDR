@@ -110,6 +110,9 @@ std::unique_ptr<AnanPanAnalyzer> AnanPanAnalyzer::create(int disp, const Setting
 
     Settings checked = settings;
     checked.window = std::clamp(checked.window, 0, kWindowCount - 1);
+    // Estimated plans (WDSP patch 24): a display FFT does not need a measured
+    // one, and it is what lets setFftSize() change the size live.
+    SetDisplayPlanEstimate(disp, 1);
     std::unique_ptr<AnanPanAnalyzer> a(new AnanPanAnalyzer(disp, checked));
     a->applySettings();
     return a;
@@ -159,8 +162,8 @@ void AnanPanAnalyzer::applySettings()
     m_windowLow = clipLow / bins;
     m_windowHigh = 1.0 - clipHigh / bins;
     {
-        // Plans FFTW_PATIENT when the size changes, which it does only on the
-        // first call after create().
+        // Plans when the FFT size changes: at create() and in setFftSize().
+        // Estimated plans (WDSP patch 24), so this is milliseconds.
         auto lock = WdspChannel::fftwSetupLock();
         SetAnalyzer(m_disp,
                     1,                  // one pixel output
@@ -281,6 +284,16 @@ void AnanPanAnalyzer::setViewAndPoints(double viewLow, double viewHigh, int poin
     // The averaging history is per point, and the points now stand for other
     // frequencies: seed from the next frame, as setNumPoints() does.
     m_seeded = false;
+    m_stagedCount = 0;   // SetAnalyzer() resets the input ring
+    applySettings();
+}
+
+void AnanPanAnalyzer::setFftSize(int fftSize)
+{
+    fftSize = std::max(0, fftSize);
+    if (fftSize == m_settings.fftSize)
+        return;
+    m_settings.fftSize = fftSize;
     m_stagedCount = 0;   // SetAnalyzer() resets the input ring
     applySettings();
 }

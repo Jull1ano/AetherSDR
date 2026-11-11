@@ -184,6 +184,9 @@ public:
     // One FFT AVG step as a time, so the readout shows milliseconds; 0 keeps
     // the bare number.
     void setFftAverageStepMs(int ms);
+    // The trace's attack and decay in ms (0 = off), for an analyzer that has
+    // them; a negative value hides the two rows.
+    void setHostBallistics(int attackMs, int decayMs);
     // The weighted-average toggle's label on this radio; empty restores
     // "Wt Avg".
     void setWeightedAverageLabel(const QString& label);
@@ -269,6 +272,8 @@ signals:
     void sampleRateRequested(int hz);
     void hostFftSizeChanged(int size);      // 0 = automatic
     void hostFftWindowChanged(int window);  // index into the offered windows
+    void hostAttackChanged(int ms);         // 0 = off
+    void hostDecayChanged(int ms);          // 0 = off
     void fftFpsChanged(int fps);
     void fftWeightedAverageChanged(bool on);
     void fftFillAlphaChanged(float alpha);
@@ -518,6 +523,15 @@ private:
     QComboBox*   m_fftSizeCmb{nullptr};
     QLabel*      m_fftWindowLbl{nullptr};
     QComboBox*   m_fftWindowCmb{nullptr};
+    // Attack / Decay rows: title, slider (10 ms steps), readout.
+    static constexpr int kBallisticsStepMs = 10;
+    static QString ballisticsText(int steps);
+    QLabel*      m_attackTitle{nullptr};
+    QSlider*     m_attackSlider{nullptr};
+    QLabel*      m_attackLabel{nullptr};
+    QLabel*      m_decayTitle{nullptr};
+    QSlider*     m_decaySlider{nullptr};
+    QLabel*      m_decayLabel{nullptr};
     QSlider*     m_fpsSlider{nullptr};
     QLabel*      m_fpsLabel{nullptr};
     QSlider*     m_smoothSlider{nullptr};

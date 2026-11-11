@@ -885,6 +885,12 @@ struct RadioCapabilities {
         // no rate control is offered.
         QVector<int> sampleRatesHz;
         int sampleRateHz = 0;
+        // The trace's attack and decay in force, ms (0 = none): a point rises
+        // with the one time constant and falls with the other, after the time
+        // average. Sent as {attackMs} / {decayMs} through the same verb.
+        // Negative: the analyzer has no such control and none is offered.
+        int attackMs = -1;
+        int decayMs = -1;
         // What the weighted-average toggle selects on this analyzer, as a
         // short button label. Empty keeps the display's own wording.
         QString weightedAverageLabel;

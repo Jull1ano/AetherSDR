@@ -32,6 +32,11 @@ constexpr const char* kFieldAgcThresholdAuto  = "agcThresholdAuto";   // brick3-
 constexpr const char* kFieldPanFftSize        = "panFftSize";         // brick3-angelia
 constexpr const char* kFieldPanWindow         = "panWindow";          // brick3-angelia
 constexpr int kDefaultPanWindow = 5;   // Kaiser: AnanPanAnalyzer::kDefaultWindow
+constexpr const char* kFieldPanAttackMs       = "panAttackMs";        // brick3-angelia
+constexpr const char* kFieldPanDecayMs        = "panDecayMs";         // brick3-angelia
+constexpr int kDefaultPanAttackMs = 70;
+constexpr int kDefaultPanDecayMs = 260;
+constexpr int kMaxPanBallisticsMs = 5000;
 
 }  // namespace
 
@@ -219,6 +224,32 @@ void AnanSettings::setPanWindow(int window)
 {
     QJsonObject obj = readObj();
     obj[QLatin1String(kFieldPanWindow)] = window >= 0 ? window : kDefaultPanWindow;
+    writeObj(obj);
+}
+
+int AnanSettings::panAttackMs()
+{
+    const int v = readObj().value(QLatin1String(kFieldPanAttackMs)).toInt(kDefaultPanAttackMs);
+    return (v >= 0 && v <= kMaxPanBallisticsMs) ? v : kDefaultPanAttackMs;
+}
+
+void AnanSettings::setPanAttackMs(int ms)
+{
+    QJsonObject obj = readObj();
+    obj[QLatin1String(kFieldPanAttackMs)] = (ms >= 0 && ms <= kMaxPanBallisticsMs) ? ms : 0;
+    writeObj(obj);
+}
+
+int AnanSettings::panDecayMs()
+{
+    const int v = readObj().value(QLatin1String(kFieldPanDecayMs)).toInt(kDefaultPanDecayMs);
+    return (v >= 0 && v <= kMaxPanBallisticsMs) ? v : kDefaultPanDecayMs;
+}
+
+void AnanSettings::setPanDecayMs(int ms)
+{
+    QJsonObject obj = readObj();
+    obj[QLatin1String(kFieldPanDecayMs)] = (ms >= 0 && ms <= kMaxPanBallisticsMs) ? ms : 0;
     writeObj(obj);
 }
 

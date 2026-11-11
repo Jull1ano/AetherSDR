@@ -1231,8 +1231,11 @@ void SetAnalyzer (	int disp,			// display identifier
 			{
 				if (a->plan[i][j])		fftw_destroy_plan (a->plan[i][j]);
 				if (a->Cplan[i][j])		fftw_destroy_plan (a->Cplan[i][j]);
-				a->plan[i][j] = fftw_plan_dft_r2c_1d(sz, a->fft_in[i][j], a->fft_out[i][j], FFTW_PATIENT);
-				a->Cplan[i][j] = fftw_plan_dft_1d(sz, a->Cfft_in[i][j], a->fft_out[i][j], FFTW_FORWARD, FFTW_PATIENT);
+				// AetherSDR patch 24: the planner's rigor is the display's choice.
+				a->plan[i][j] = fftw_plan_dft_r2c_1d(sz, a->fft_in[i][j], a->fft_out[i][j],
+					a->plan_estimate ? FFTW_ESTIMATE : FFTW_PATIENT);
+				a->Cplan[i][j] = fftw_plan_dft_1d(sz, a->Cfft_in[i][j], a->fft_out[i][j], FFTW_FORWARD,
+					a->plan_estimate ? FFTW_ESTIMATE : FFTW_PATIENT);
 			}
 
 		// Setup DetectMaxBin for a 'size' change.
@@ -1848,6 +1851,15 @@ void SetDisplayAvBackmult (int disp, int pixout, double mult)
 		a->av_backmult[pixout] = mult;
 		LeaveCriticalSection (&a->ResampleSection);
 	}
+}
+
+// AetherSDR patch 24: see AETHERSDR-PATCHES.md. Takes effect at the next
+// SetAnalyzer() that changes the FFT size.
+PORT
+void SetDisplayPlanEstimate (int disp, int estimate)
+{
+	DP a = pdisp[disp];
+	a->plan_estimate = estimate ? 1 : 0;
 }
 
 PORT

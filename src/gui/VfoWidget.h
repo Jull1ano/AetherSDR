@@ -333,9 +333,6 @@ Q_SIGNALS:
     void recordToggled(bool on);
     void playToggled(bool on);
     void aetherDspRequested();     // user clicked the ADSP button on the DSP tab
-    // brick3-angelia: a quick-row NR button was clicked; `on` is what the
-    // click asks for (false = that method, the running one, off).
-    void clientNrToggled(const QString& method, bool on);
     void aetherVoiceRequested();   // user clicked the AetherVoice button on the DSP tab
     void splitToggled();
     void swapRequested();
@@ -653,12 +650,6 @@ public:
     // visible on the VFO grid without opening the applet. Driven by MainWindow
     // from the AudioEngine *EnabledChanged signals. (#3800)
     void setAetherDspActive(bool active);
-    // brick3-angelia: the quick client-NR row on the DSP tab (NR2 NR4 MNR
-    // DFNR RN2 BNR NNR). Active: the one running method, or empty for none.
-    // Available: whether this build and machine can run it, with the reason.
-    void setClientNrActive(const QString& method);
-    void setClientNrAvailable(const QString& method, bool available,
-                              const QString& toolTip);
 
     // Per-slice VFO marker display prefs, persisted by slice ID (#1526).
     // markerWidth: 0 = off, 1 = 1 px, 3 = 3 px.
@@ -721,8 +712,6 @@ private:
     // Holds the two launchers side by side; relayoutDspGrid() spans it across
     // whatever columns the toggles leave free, and the pair split that evenly.
     QWidget*     m_aetherLauncherRow{nullptr};
-    QWidget*     m_clientNrRow{nullptr};         // quick client-NR row (brick3-angelia)
-    QVector<QPushButton*> m_clientNrBtns;
 
     // Shared DSP-level row at the bottom of the DSP grid: one slider whose
     // target switches based on which leveled DSP the user most recently

@@ -84,6 +84,12 @@ public:
         // own follows from it and from the view.
         double panViewLow = 0.0;
         double panViewHigh = 1.0;
+        // brick3-angelia: attack and decay of the trace, ms; 0 = none. A
+        // point rises with the one time constant and falls with the other,
+        // after the time average above. Kept current by
+        // setSpectrumBallistics().
+        int spectrumAttackMs = 0;
+        int spectrumDecayMs = 0;
         // brick3-angelia: WDSP's automatic notch filter, kept current by
         // setAutoNotch(). In Config for the same reason as the blanker.
         bool autoNotch = false;
@@ -229,6 +235,11 @@ public:
     Q_INVOKABLE void setPanPoints(int points);
     // brick3-angelia: the analyzer's window; see AnanPanAnalyzer::setWindow().
     Q_INVOKABLE void setPanWindow(int window);
+    // brick3-angelia: the analyzer's FFT size (0 = automatic), live; see
+    // AnanPanAnalyzer::setFftSize().
+    Q_INVOKABLE void setPanFftSize(int fftSize);
+    // brick3-angelia: the trace's attack and decay, ms; 0 = none.
+    Q_INVOKABLE void setSpectrumBallistics(int attackMs, int decayMs);
     // brick3-angelia: the part of the sampled band to show (Config::
     // panViewLow/High). Takes effect at once -- the frame in hand is re-read
     // onto the new view and published -- and the analyzer is re-aimed once
@@ -439,8 +450,27 @@ private:
     PanWindow m_nextView;
     int m_nextViewRateHz = 0;
     PanWindow m_frameWindow;        // the part of the band m_bins covers
-    bool m_frameValid = false;      // m_bins holds a frame of this analyzer
-    std::vector<float> m_viewBins;  // the frame as the view shows it
+    std::vector<float> m_viewBins;  // the trace as the view shows it
+
+    // ---- brick3-angelia: the trace's movement in time ----
+    // The time average (FFT AVG, log or linear) and the attack/decay run
+    // HERE, on the analyzer's frames, not inside WDSP: their state then
+    // survives the analyzer being re-aimed. WDSP's own average restarts from
+    // one raw frame every time, which is what made the trace turn to grass
+    // for a moment after each drag.
+    //
+    // m_average is the averaged frame, m_trace what is published: m_average
+    // followed with the attack/decay. Both sit on the grid of the frame they
+    // were last fed (m_traceWindow), and are carried onto a new grid when the
+    // analyzer's window or point count changes.
+    void smoothFrame();
+    void carryOntoFrameGrid(std::vector<float>& state);
+    std::vector<float> m_average;
+    std::vector<float> m_trace;
+    std::vector<float> m_carry;     // scratch for carryOntoFrameGrid()
+    PanWindow m_traceWindow;        // the part of the band m_trace covers
+    bool m_traceValid = false;      // m_trace holds something to publish
+    QElapsedTimer m_frameClock;     // time between analyzer frames
 
     // Live droop-correction tables, keyed by DDC0 rate in ksps -- see
     // setDroopCorrectionTable(). Survives a rate-change rebuild untouched:

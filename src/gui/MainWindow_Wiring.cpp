@@ -3482,7 +3482,9 @@ void MainWindow::wirePanDisplayStatus(PanadapterApplet* applet,
             menu->setHostAnalyzerChoices(analyzer->fftSizes, analyzer->fftSize,
                                          analyzer->windows, analyzer->window);
             menu->setWeightedAverageLabel(analyzer->weightedAverageLabel);
+            menu->setHostBallistics(analyzer->attackMs, analyzer->decayMs);
         } else {
+            menu->setHostBallistics(-1, -1);
             menu->setSampleRateChoices({}, 0);
             menu->setHostAnalyzerChoices({}, 0, {}, 0);
             menu->setWeightedAverageLabel({});
@@ -5016,6 +5018,8 @@ void MainWindow::wirePanadapter(PanadapterApplet* applet)
     disconnect(menu, &SpectrumOverlayMenu::sampleRateRequested, this, nullptr);
     disconnect(menu, &SpectrumOverlayMenu::hostFftSizeChanged, this, nullptr);
     disconnect(menu, &SpectrumOverlayMenu::hostFftWindowChanged, this, nullptr);
+    disconnect(menu, &SpectrumOverlayMenu::hostAttackChanged, this, nullptr);
+    disconnect(menu, &SpectrumOverlayMenu::hostDecayChanged, this, nullptr);
     auto sendHostAnalyzer = [this](const QString& field, int value) {
         const RadioCapabilities caps = m_radioModel.backendCapabilities();
         if (!m_radioModel.isConnected() || !caps.hostPanAnalyzer)
@@ -5026,13 +5030,17 @@ void MainWindow::wirePanadapter(PanadapterApplet* applet)
         return true;
     };
     connect(menu, &SpectrumOverlayMenu::hostFftSizeChanged,
-            this, [this, sendHostAnalyzer](int size) {
-        if (sendHostAnalyzer(QStringLiteral("fftSize"), size)) {
-            statusBar()->showMessage(
-                tr("Preparing the new FFT size - the spectrum switches when it is ready "
-                   "(a size never used before can take minutes)"),
-                8000);
-        }
+            this, [sendHostAnalyzer](int size) {
+        // Live now: nothing to wait for, so nothing to announce.
+        sendHostAnalyzer(QStringLiteral("fftSize"), size);
+    });
+    connect(menu, &SpectrumOverlayMenu::hostAttackChanged,
+            this, [sendHostAnalyzer](int ms) {
+        sendHostAnalyzer(QStringLiteral("attackMs"), ms);
+    });
+    connect(menu, &SpectrumOverlayMenu::hostDecayChanged,
+            this, [sendHostAnalyzer](int ms) {
+        sendHostAnalyzer(QStringLiteral("decayMs"), ms);
     });
     connect(menu, &SpectrumOverlayMenu::hostFftWindowChanged,
             this, [sendHostAnalyzer](int window) {
@@ -6553,8 +6561,6 @@ void MainWindow::wireVfoWidget(VfoWidget* w, SliceModel* s)
                              || m_audio->dfnrEnabled() || m_audio->rn2Enabled()
                              || m_audio->nvAfxEnabled() || m_audio->nnrEnabled();
             w->setAetherDspActive(active);
-            // brick3-angelia: the flag's quick NR row lights the running method.
-            w->setClientNrActive(activeAetherDspMethod());
         };
         connect(m_audio, &AudioEngine::nr2EnabledChanged,  w, [syncAetherDsp](bool){ syncAetherDsp(); });
         connect(m_audio, &AudioEngine::nr4EnabledChanged,  w, [syncAetherDsp](bool){ syncAetherDsp(); });
@@ -6564,34 +6570,6 @@ void MainWindow::wireVfoWidget(VfoWidget* w, SliceModel* s)
         connect(m_audio, &AudioEngine::nvAfxEnabledChanged, w, [syncAetherDsp](bool){ syncAetherDsp(); });
         connect(m_audio, &AudioEngine::nnrEnabledChanged,   w, [syncAetherDsp](bool){ syncAetherDsp(); });
         syncAetherDsp();  // apply current state to this freshly-wired slice
-
-        // brick3-angelia: the quick NR row under the launchers. What can run
-        // here is read from the AetherRX applet's own selector (build flags,
-        // GPU, compressed audio), once for the dimmed look and again at the
-        // click, since NR2's answer can change while connected.
-        for (const char* method : {"NR2", "NR4", "MNR", "DFNR", "RN2", "BNR", "NNR"}) {
-            const QString name = QString::fromLatin1(method);
-            const auto [available, reason] = clientNrAvailability(name);
-            // NR2's availability moves with the audio path; leave it enabled
-            // and let the click answer.
-            if (name != QLatin1String("NR2"))
-                w->setClientNrAvailable(name, available, reason);
-        }
-        connect(w, &VfoWidget::clientNrToggled, this,
-                [this, w](const QString& method, bool on) {
-            const QPointer<VfoWidget> flag(w);
-            // Whatever happens, the row ends up showing what the engine runs:
-            // a refused or failed switch must not leave a button lit.
-            auto resync = [this, flag] {
-                if (flag)
-                    flag->setClientNrActive(activeAetherDspMethod());
-            };
-            if (!requestClientNr(method, on)) {
-                resync();
-                return;
-            }
-            QTimer::singleShot(400, this, resync);
-        });
     }
 
     // AetherVoice button on the per-slice DSP tab — toggles the Aetherial

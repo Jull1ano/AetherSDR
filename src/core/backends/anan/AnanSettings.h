@@ -82,6 +82,14 @@ public:
     static void setPanFftSize(int size);
     static int panWindow();
     static void setPanWindow(int window);
+    // brick3-angelia: the trace's attack and decay, ms (0 = none): a point
+    // rises with the one time constant and falls with the other. Defaults 70
+    // and 260, a quick rise with a gentle fall. Same life cycle as the two
+    // above ("pan.set" writes them).
+    static int panAttackMs();
+    static void setPanAttackMs(int ms);
+    static int panDecayMs();
+    static void setPanDecayMs(int ms);
 
     // The DDC0 rates a session may start at, for a UI offering the choice.
     //

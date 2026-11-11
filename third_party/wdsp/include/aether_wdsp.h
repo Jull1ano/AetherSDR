@@ -532,6 +532,10 @@ void SetDisplayNumAverage(int disp, int pixout, int num);
 void SetDisplayAvBackmult(int disp, int pixout, double mult);
 void SetDisplaySampleRate(int disp, int rate);
 void SetDisplayNormOneHz(int disp, int pixout, int norm);
+// AetherSDR patch 24: nonzero makes SetAnalyzer plan this display's FFTs with
+// FFTW_ESTIMATE instead of FFTW_PATIENT, so a new FFT size costs milliseconds
+// and may be planned on the feeding thread. Call before SetAnalyzer.
+void SetDisplayPlanEstimate(int disp, int estimate);
 
 int GetWDSPVersion(void);
 

@@ -41,6 +41,8 @@ public:
 signals:
     // A button was clicked; `on` is what the click asks for.
     void toggled(const QString& id, bool on);
+    // A button was right-clicked: show that switch's settings.
+    void settingsRequested(const QString& id);
 
 private:
     QPushButton* button(const QString& id) const;

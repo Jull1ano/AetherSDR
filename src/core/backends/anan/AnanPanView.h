@@ -54,9 +54,11 @@ inline void applyDroopCorrectionDbWindowed(std::vector<float>& pointsDb,
 // point; where the source is coarser, the output is interpolated between the
 // two nearest. Output points outside the source take the frame's lowest
 // value: nothing is known there until the analyzer has been re-aimed.
+// `outside`, when given, is the value for output points outside the source
+// instead of the frame's lowest (a NaN there lets the caller fill them in).
 inline void resamplePanWindow(const std::vector<float>& src, double srcLow, double srcHigh,
                               double dstLow, double dstHigh, std::size_t count,
-                              std::vector<float>& out)
+                              std::vector<float>& out, const float* outside = nullptr)
 {
     out.resize(count);
     const std::size_t m = src.size();
@@ -64,7 +66,7 @@ inline void resamplePanWindow(const std::vector<float>& src, double srcLow, doub
         std::fill(out.begin(), out.end(), m > 0 ? src.front() : -160.0f);
         return;
     }
-    const float floorDb = *std::min_element(src.begin(), src.end());
+    const float floorDb = outside ? *outside : *std::min_element(src.begin(), src.end());
     // Band fraction per point, on each grid.
     const double srcStep = (srcHigh - srcLow) / static_cast<double>(m - 1);
     const double dstStep = (dstHigh - dstLow) / static_cast<double>(count - 1);
@@ -107,6 +109,55 @@ inline void resamplePanWindow(const std::vector<float>& src, double srcLow, doub
         out[i] = static_cast<float>(static_cast<double>(src[j])
                                     + t * (static_cast<double>(src[j + 1])
                                            - static_cast<double>(src[j])));
+    }
+}
+
+// ---- the trace's movement in time ----
+//
+// The share of a new frame in a recursive average with time constant `tau`,
+// for frames `dt` apart (both in seconds). No time constant means no
+// averaging: the new frame is taken whole.
+inline float smoothingAlpha(double dt, double tau) noexcept
+{
+    if (!(tau > 0.0) || !(dt > 0.0))
+        return 1.0f;
+    return static_cast<float>(1.0 - std::exp(-dt / tau));
+}
+
+// One step of a recursive time average of `frame` into `state` (same size).
+// logDomain averages the dB values, which is WDSP's "log recursive" and the
+// calm look; otherwise the POWER is averaged ("recursive"), which reads noise
+// and weak signals at their true level.
+inline void averageTowards(std::vector<float>& state, const std::vector<float>& frame,
+                           float alpha, bool logDomain)
+{
+    const std::size_t n = std::min(state.size(), frame.size());
+    if (alpha >= 1.0f) {
+        std::copy(frame.begin(), frame.begin() + static_cast<std::ptrdiff_t>(n), state.begin());
+        return;
+    }
+    if (logDomain) {
+        for (std::size_t i = 0; i < n; ++i)
+            state[i] += alpha * (frame[i] - state[i]);
+        return;
+    }
+    for (std::size_t i = 0; i < n; ++i) {
+        const double power = (1.0 - alpha) * std::pow(10.0, static_cast<double>(state[i]) / 10.0)
+                             + alpha * std::pow(10.0, static_cast<double>(frame[i]) / 10.0);
+        state[i] = power > 0.0 ? static_cast<float>(10.0 * std::log10(power)) : frame[i];
+    }
+}
+
+// Attack and decay: `trace` follows `target` (same size) with one share for a
+// point that has to rise and another for one that has to fall. A quick attack
+// with a slower decay lets a signal come up at once and sink back gently.
+inline void followWithBallistics(std::vector<float>& trace, const std::vector<float>& target,
+                                 float attackAlpha, float decayAlpha) noexcept
+{
+    const std::size_t n = std::min(trace.size(), target.size());
+    for (std::size_t i = 0; i < n; ++i) {
+        const float d = target[i] - trace[i];
+        trace[i] += (d > 0.0f ? attackAlpha : decayAlpha) * d;
     }
 }
 

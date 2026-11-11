@@ -758,6 +758,10 @@ static void populateFamilyParams(RadioConnectRequest& req, const QString& family
                           anan::AnanSettings::panFftSize());
         req.params.insert(QStringLiteral("anan.panWindow"),
                           anan::AnanSettings::panWindow());
+        req.params.insert(QStringLiteral("anan.panAttackMs"),
+                          anan::AnanSettings::panAttackMs());
+        req.params.insert(QStringLiteral("anan.panDecayMs"),
+                          anan::AnanSettings::panDecayMs());
         return;
     }
 

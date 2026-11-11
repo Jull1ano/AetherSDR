@@ -577,6 +577,8 @@ RadioCapabilities AnanBackend::capabilities() const
         for (const int ksps : kDdc0RatesKsps)
             analyzer.sampleRatesHz.append(ksps * 1000);
         analyzer.sampleRateHz = m_pendingParams.rx1RateKsps * 1000;
+        analyzer.attackMs = m_panAttackMs;
+        analyzer.decayMs = m_panDecayMs;
         analyzer.weightedAverageLabel = QStringLiteral("Log Avg");
         c.hostPanAnalyzer = analyzer;
     }
@@ -901,6 +903,12 @@ void AnanBackend::connectRadio(const RadioConnectRequest& request)
         request.params.value(QStringLiteral("anan.panWindow"),
                              AnanPanAnalyzer::kDefaultWindow).toInt(),
         0, AnanPanAnalyzer::kWindowCount - 1);
+    // brick3-angelia: the trace's attack and decay. 0 for a connect that
+    // never populated them: no smoothing is the behaviour before they existed.
+    m_panAttackMs = std::clamp(
+        request.params.value(QStringLiteral("anan.panAttackMs"), 0).toInt(), 0, 5000);
+    m_panDecayMs = std::clamp(
+        request.params.value(QStringLiteral("anan.panDecayMs"), 0).toInt(), 0, 5000);
     // applyRestoredState() seeds both ADC values before this connect.
     m_attenuationDb = m_pendingParams.rx1AdcIndex == 1
         ? m_pendingParams.adc1AttenuationDb
@@ -951,6 +959,8 @@ void AnanBackend::connectRadio(const RadioConnectRequest& request)
     m_pendingDspConfig.panPoints = m_panPoints;
     m_pendingDspConfig.panFftSize = m_panFftSize;
     m_pendingDspConfig.panWindow = m_panWindow;
+    m_pendingDspConfig.spectrumAttackMs = m_panAttackMs;
+    m_pendingDspConfig.spectrumDecayMs = m_panDecayMs;
     // The view, so the session's first analyzer is aimed at it. Written
     // straight into the config: the DSP may still hold the last session's
     // analyzer, which a queued setPanView() would re-aim for nothing.
@@ -2072,22 +2082,34 @@ void AnanBackend::invokeExtension(const QString& ns, const QString& verb,
                 m_panFftSize = size;
                 m_pendingDspConfig.panFftSize = size;
                 AnanSettings::setPanFftSize(size);
-                // A new FFT size is planned FFTW_PATIENT, which may not run on
-                // the thread that feeds the receiver: rebuild the channel and
-                // its analyzer on the build thread, exactly as a zoom does --
-                // beginRateChange() at the rate already running. The running
-                // display and audio carry on until the swap (a 250 ms mute).
-                // A size never planned before can take a while the first
-                // time; FFTW's wisdom cache makes it instant afterwards.
-                if (m_connected) {
-                    const int rateKsps = m_pendingParams.rx1RateKsps;
-                    if (!m_rateChanging)
-                        beginRateChange(rateKsps);
-                    else if (m_pendingBandwidthKsps == 0)
-                        m_pendingBandwidthKsps = rateKsps;
-                    // else: a zoom is already queued behind the running
-                    // rebuild, and its build reads m_pendingDspConfig too.
+                // Live: the analyzer's plans are estimated (WDSP patch 24), so
+                // a new size costs milliseconds on the DSP's own thread -- no
+                // rebuild, no audio mute. A rebuild in flight takes the size
+                // from m_pendingDspConfig, or from the DSP at its install.
+                if (m_dsp) {
+                    QMetaObject::invokeMethod(m_dsp, "setPanFftSize", Qt::QueuedConnection,
+                                              Q_ARG(int, size));
                 }
+            }
+        }
+        if (fields.contains(QStringLiteral("attackMs"))
+            || fields.contains(QStringLiteral("decayMs"))) {
+            // The trace's attack and decay, live.
+            if (fields.contains(QStringLiteral("attackMs"))) {
+                m_panAttackMs = std::clamp(
+                    fields.value(QStringLiteral("attackMs")).toInt(), 0, 5000);
+                AnanSettings::setPanAttackMs(m_panAttackMs);
+            }
+            if (fields.contains(QStringLiteral("decayMs"))) {
+                m_panDecayMs = std::clamp(
+                    fields.value(QStringLiteral("decayMs")).toInt(), 0, 5000);
+                AnanSettings::setPanDecayMs(m_panDecayMs);
+            }
+            m_pendingDspConfig.spectrumAttackMs = m_panAttackMs;
+            m_pendingDspConfig.spectrumDecayMs = m_panDecayMs;
+            if (m_dsp) {
+                QMetaObject::invokeMethod(m_dsp, "setSpectrumBallistics", Qt::QueuedConnection,
+                                          Q_ARG(int, m_panAttackMs), Q_ARG(int, m_panDecayMs));
             }
         }
         if (requestId != 0) {

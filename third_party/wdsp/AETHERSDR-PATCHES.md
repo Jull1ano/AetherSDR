@@ -1300,3 +1300,25 @@ stop-and-flush wait". With the patch, all of `wdsp_channel_test` passes.
 
 Drop this if upstream narrows the condition itself, or if `WdspChannel` ever
 clocks a stopping channel's ramp out before handing control to WDSP.
+
+## Patch 24 -- the panadapter analyzer's planner rigor is the display's choice (brick3-angelia)
+
+`SetAnalyzer()` planned both of a display's FFTs with `FFTW_PATIENT`. That is
+free once FFTW's wisdom holds the size, and minutes when it does not: a
+262144-point plan, the size Thetis's users run, was unusable the first time it
+was picked, and any new size had to be built off the feeding thread (a whole
+receiver rebuild, with its audio mute) because nothing may block that thread
+for a planner's measurement run.
+
+`struct _dp` gains `plan_estimate` (zero from `malloc0`, i.e. upstream's
+behaviour) and `SetDisplayPlanEstimate(disp, estimate)` sets it; `SetAnalyzer()`
+passes `FFTW_ESTIMATE` instead of `FFTW_PATIENT` when it is set. An estimated
+plan still takes wisdom when the size has some, and costs a display FFT some
+speed when it has none, which a panadapter can afford: `AnanPanAnalyzer` sets
+it and so changes the FFT size live, in milliseconds.
+
+Marked `// AetherSDR patch 24:` in `upstream/analyzer.c` and `upstream/analyzer.h`.
+
+**Upstream status.** Not reported.
+
+When updating WDSP, keep this unless upstream offers its own planner flag.

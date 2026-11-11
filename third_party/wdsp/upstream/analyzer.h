@@ -33,6 +33,7 @@ typedef struct _dp
 	int max_size;											// maximum fft size to be used
 	int max_num_fft;										// maximum number of LO positions per sub-span to be used
 	int max_stitch;											// maximum number of sub-spans to be concatenated
+	int plan_estimate;										// AetherSDR patch 24: plan this display's FFTs with FFTW_ESTIMATE (0 = upstream's FFTW_PATIENT)
 															//		NOTE:  max_size, max_num_fft, and max_stitch MUST BE <= THE
 															//		CORRESPONDING VALUES IN <analyzer.h>!!
 	int num_fft;											// current number of ffts in use
@@ -175,6 +176,10 @@ void XCreateAnalyzer (	int disp,
 
 extern __declspec( dllexport )   
 void DestroyAnalyzer(int disp);
+
+// AetherSDR patch 24: nonzero plans this display's FFTs with FFTW_ESTIMATE.
+extern __declspec( dllexport )
+void SetDisplayPlanEstimate(int disp, int estimate);
 
 extern __declspec( dllexport )   
 void SetCalibration (	int disp,

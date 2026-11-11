@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 
 Q_LOGGING_CATEGORY(lcAnanRxDsp, "aether.anan.rxdsp")
 
@@ -140,8 +141,9 @@ AnanRxDsp::RebuildResult AnanRxDsp::buildChannel(const Config& config)
     as.sampleRateHz = config.inputSampleRateHz;
     as.numPoints = config.panPoints;
     as.framesPerSecond = config.spectrumFps;
-    as.averageTimeMs = config.spectrumAverageMs;
-    as.logAverage = config.spectrumLogAverage;
+    // No averaging inside WDSP: the time average and the attack/decay run in
+    // smoothFrame(), where their state survives a re-aimed analyzer.
+    as.averageTimeMs = 0;
     as.fftSize = config.panFftSize;
     as.window = config.panWindow;
     auto analyzer = AnanPanAnalyzer::create(channel->channelId(), as, &result.error);
@@ -277,10 +279,13 @@ void AnanRxDsp::installChannel(RebuildResult result)
     // built for the whole band at the width of when the build began.
     retargetAnalyzer(*result.analyzer);
     m_viewDirty = false;
-    m_frameValid = false;   // m_bins belongs to the outgoing analyzer
-    result.analyzer->setAverageTimeMs(m_config.spectrumAverageMs);
-    result.analyzer->setLogAverage(m_config.spectrumLogAverage);
+    // The trace belongs to the outgoing analyzer, and after a rate change to
+    // another band: start it again from the first frame.
+    m_traceValid = false;
+    m_frameClock.invalidate();
     result.analyzer->setWindow(m_config.panWindow);
+    // The operator may have picked another FFT size while the build ran.
+    result.analyzer->setFftSize(m_config.panFftSize);
     // Analyzer before channel: the outgoing analyzer uses the outgoing
     // channel's id as its slot and must be destroyed before that channel
     // releases the id -- see RebuildResult.
@@ -420,11 +425,8 @@ void AnanRxDsp::setSpectrumAverageMs(int ms)
 {
     if (ms < 0)
         return;
+    // Read by smoothFrame() on the next frame.
     m_config.spectrumAverageMs = ms;
-    // Same deferral as setSpectrumRateFps(): the incoming analyzer picks it
-    // up at install.
-    if (m_analyzer && !m_rebuildInFlight)
-        m_analyzer->setAverageTimeMs(ms);
 }
 
 void AnanRxDsp::setPanPoints(int points)
@@ -516,23 +518,89 @@ void AnanRxDsp::setPanView(double low, double high, int sampleRateHz)
     m_viewChangeClock.start();
     // Show the move now, from the frame in hand: what it covers lands where
     // it belongs, and the rest follows when the analyzer has been re-aimed.
-    if (m_frameValid)
+    if (m_traceValid)
         publishSpectrum();
 }
 
 void AnanRxDsp::publishSpectrum()
 {
-    const bool isView = m_bins.size() == static_cast<std::size_t>(m_config.panPoints)
-        && std::abs(m_frameWindow.low - m_config.panViewLow) < 1e-9
-        && std::abs(m_frameWindow.high - m_config.panViewHigh) < 1e-9;
+    const bool isView = m_trace.size() == static_cast<std::size_t>(m_config.panPoints)
+        && std::abs(m_traceWindow.low - m_config.panViewLow) < 1e-9
+        && std::abs(m_traceWindow.high - m_config.panViewHigh) < 1e-9;
     if (isView) {
-        emit spectrumReady(m_bins);
+        emit spectrumReady(m_trace);
         return;
     }
-    resamplePanWindow(m_bins, m_frameWindow.low, m_frameWindow.high,
+    resamplePanWindow(m_trace, m_traceWindow.low, m_traceWindow.high,
                       m_config.panViewLow, m_config.panViewHigh,
                       static_cast<std::size_t>(std::max(2, m_config.panPoints)), m_viewBins);
     emit spectrumReady(m_viewBins);
+}
+
+void AnanRxDsp::carryOntoFrameGrid(std::vector<float>& state)
+{
+    // The state as it reads on the new frame's grid. Where the old grid did
+    // not reach, there is nothing to carry: the new frame's own value starts
+    // those points.
+    const float unknown = std::numeric_limits<float>::quiet_NaN();
+    resamplePanWindow(state, m_traceWindow.low, m_traceWindow.high,
+                      m_frameWindow.low, m_frameWindow.high, m_bins.size(), m_carry, &unknown);
+    for (std::size_t i = 0; i < m_carry.size(); ++i) {
+        if (std::isnan(m_carry[i]))
+            m_carry[i] = m_bins[i];
+    }
+    state.swap(m_carry);
+}
+
+void AnanRxDsp::smoothFrame()
+{
+    // The time since the last frame, so the time constants hold whatever the
+    // frame rate does. The first frame of a run assumes the display rate.
+    double dt = 1.0 / std::max(1, m_config.spectrumFps);
+    if (m_frameClock.isValid())
+        dt = std::clamp(static_cast<double>(m_frameClock.nsecsElapsed()) / 1.0e9, 0.001, 0.25);
+    m_frameClock.start();
+
+    if (!m_traceValid || m_bins.size() < 2) {
+        m_average = m_bins;
+        m_trace = m_bins;
+    } else if (m_trace.size() != m_bins.size()
+               || std::abs(m_traceWindow.low - m_frameWindow.low) > 1e-12
+               || std::abs(m_traceWindow.high - m_frameWindow.high) > 1e-12) {
+        // The analyzer was re-aimed (a zoom, a pan past its window, a new
+        // width): keep what has been built up, on the new grid.
+        carryOntoFrameGrid(m_average);
+        carryOntoFrameGrid(m_trace);
+    }
+    m_traceWindow = m_frameWindow;
+    m_traceValid = true;
+
+    averageTowards(m_average, m_bins,
+                   smoothingAlpha(dt, m_config.spectrumAverageMs / 1000.0),
+                   m_config.spectrumLogAverage);
+    if (m_config.spectrumAttackMs <= 0 && m_config.spectrumDecayMs <= 0) {
+        m_trace = m_average;
+    } else {
+        followWithBallistics(m_trace, m_average,
+                             smoothingAlpha(dt, m_config.spectrumAttackMs / 1000.0),
+                             smoothingAlpha(dt, m_config.spectrumDecayMs / 1000.0));
+    }
+}
+
+void AnanRxDsp::setSpectrumBallistics(int attackMs, int decayMs)
+{
+    m_config.spectrumAttackMs = std::max(0, attackMs);
+    m_config.spectrumDecayMs = std::max(0, decayMs);
+}
+
+void AnanRxDsp::setPanFftSize(int fftSize)
+{
+    m_config.panFftSize = std::max(0, fftSize);
+    // Mid-rebuild the incoming analyzer takes it at install; a running one
+    // re-plans now, in milliseconds (estimated plans, WDSP patch 24). The
+    // trace is kept: the grid it sits on does not change with the FFT size.
+    if (m_analyzer && !m_rebuildInFlight)
+        m_analyzer->setFftSize(m_config.panFftSize);
 }
 
 void AnanRxDsp::setPanWindow(int window)
@@ -546,9 +614,8 @@ void AnanRxDsp::setPanWindow(int window)
 
 void AnanRxDsp::setSpectrumLogAverage(bool on)
 {
+    // Read by smoothFrame() on the next frame.
     m_config.spectrumLogAverage = on;
-    if (m_analyzer && !m_rebuildInFlight)
-        m_analyzer->setLogAverage(on);
 }
 
 void AnanRxDsp::setDroopCorrectionTable(int rateKsps, const std::vector<float>& table)
@@ -664,7 +731,7 @@ void AnanRxDsp::processIqBlock(const std::vector<std::complex<float>>& iq)
             applyDroopCorrectionDbWindowed(m_bins, droopTable, m_frameWindow.low,
                                            m_frameWindow.high);
         }
-        m_frameValid = true;
+        smoothFrame();
         publishSpectrum();
         m_lastSpectrumMs = m_spectrumClock.elapsed();
     }

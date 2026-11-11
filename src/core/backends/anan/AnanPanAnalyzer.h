@@ -130,6 +130,13 @@ public:
     // unchanged, so nothing is re-planned: WDSP only recomputes the window
     // coefficients. Resets the input ring, as setFramesPerSecond() does.
     void setWindow(int window);
+
+    // The FFT size (Settings::fftSize; 0 = automatic), live. The plans are
+    // estimated, not measured (WDSP patch 24), so this costs milliseconds and
+    // is safe on the feeding thread; it takes WdspChannel::fftwSetupLock()
+    // itself, so it must not be called while a channel build holds that lock
+    // for long (AnanRxDsp defers it during a rebuild). Resets the input ring.
+    void setFftSize(int fftSize);
     [[nodiscard]] int window() const noexcept { return m_settings.window; }
 
     // Stage raw wire IQ and hand the analyzer every whole kBlockSize block.

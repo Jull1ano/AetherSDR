@@ -464,15 +464,6 @@ static const QString kDspToggleActive =
     "color: #ffffff; font-size: 13px; font-weight: bold; padding: 2px 4px; }"
     "QPushButton:hover { border: 1px solid #0090e0; }";
 
-// brick3-angelia: the quick client-NR row under the launchers -- kDspToggle's
-// look one size down, so seven fit across the flag.
-static const QString kClientNrQuick =
-    "QPushButton { background: #1a2a3a; border: 1px solid #304050; border-radius: 2px; "
-    "color: #c8d8e8; font-size: 10px; font-weight: bold; padding: 1px 0px; }"
-    "QPushButton:checked { background: #1a6030; color: #ffffff; border: 1px solid #20a040; }"
-    "QPushButton:hover { border: 1px solid #0090e0; }"
-    "QPushButton:disabled { color: #5e6e7c; background: #141e28; border: 1px solid #243040; }";
-
 static const QString kModeBtn =
     "QPushButton { background: #1a2a3a; border: 1px solid #304050; border-radius: 2px; "
     "color: #c8d8e8; font-size: 13px; font-weight: bold; padding: 3px; }"
@@ -2127,45 +2118,6 @@ void VfoWidget::buildTabContent()
         m_dspGrid->addWidget(m_anftBtn, 2, 1);
         m_dspGrid->addWidget(m_mnBtn,   2, 2);
         dspVb->addLayout(m_dspGrid);
-
-        // brick3-angelia: the client-side noise reductions as one quick row
-        // under the launchers -- the AetherRX window's method strip in
-        // miniature. They are exclusive in the engine, so one is lit at a
-        // time; clicking the lit one switches noise reduction off. The row
-        // only emits (clientNrToggled) and shows what it is told
-        // (setClientNrActive / setClientNrAvailable): MainWindow owns the
-        // switching, as it does for the AetherRX window. AetherRX still opens
-        // the full panel with each method's settings.
-        {
-            m_clientNrRow = new QWidget;
-            m_clientNrRow->setObjectName(QStringLiteral("clientNrQuickRow"));
-            m_clientNrRow->setAccessibleName(tr("Noise reduction quick select"));
-            auto* nrBox = new QHBoxLayout(m_clientNrRow);
-            nrBox->setContentsMargins(0, 0, 0, 0);
-            nrBox->setSpacing(2);
-            static const char* const kMethods[] = {"NR2", "NR4", "MNR", "DFNR",
-                                                   "RN2", "BNR", "NNR"};
-            for (const char* method : kMethods) {
-                const QString name = QString::fromLatin1(method);
-                auto* b = new QPushButton(name);
-                b->setCheckable(true);
-                b->setFixedHeight(22);
-                // Narrower than the label's own hint, so seven share the row.
-                b->setMinimumWidth(12);
-                b->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-                b->setStyleSheet(kClientNrQuick);
-                b->setObjectName(QStringLiteral("clientNrQuick") + name);
-                b->setAccessibleName(tr("%1 noise reduction").arg(name));
-                b->setToolTip(tr("%1 noise reduction on or off. AetherRX opens its settings.")
-                                  .arg(name));
-                connect(b, &QPushButton::clicked, this, [this, name](bool on) {
-                    emit clientNrToggled(name, on);
-                });
-                m_clientNrBtns.append(b);
-                nrBox->addWidget(b, 1);
-            }
-            dspVb->addWidget(m_clientNrRow);
-        }
 
         auto* resetRow = new QHBoxLayout;
         resetRow->setSpacing(3);
@@ -3898,31 +3850,6 @@ void VfoWidget::setAetherDspActive(bool active)
     m_aetherDspBtn->setAccessibleName(active ? QStringLiteral("AetherRX (NR active)")
                                              : QStringLiteral("AetherRX"));
     updateDspTabAccent();
-}
-
-// brick3-angelia: the quick client-NR row. `method` is the running method's
-// short name (NR2 ... NNR), or empty when noise reduction is off.
-void VfoWidget::setClientNrActive(const QString& method)
-{
-    for (QPushButton* b : m_clientNrBtns) {
-        const bool on = !method.isEmpty() && b->text() == method;
-        if (b->isChecked() != on)
-            b->setChecked(on);
-    }
-}
-
-void VfoWidget::setClientNrAvailable(const QString& method, bool available,
-                                     const QString& toolTip)
-{
-    for (QPushButton* b : m_clientNrBtns) {
-        if (b->text() != method)
-            continue;
-        b->setEnabled(available);
-        if (!toolTip.isEmpty()) {
-            b->setToolTip(toolTip);
-            b->setAccessibleDescription(toolTip);
-        }
-    }
 }
 
 // ── VFO marker display prefs (#1526, #5570) ─────────────────────────────────

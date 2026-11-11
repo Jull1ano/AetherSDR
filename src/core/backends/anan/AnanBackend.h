@@ -575,6 +575,10 @@ private:
     // "pan.set" verb. A new size rebuilds the DSP; a window applies live.
     int m_panFftSize = 0;
     int m_panWindow = AnanPanAnalyzer::kDefaultWindow;
+    // brick3-angelia: the trace's attack and decay, ms, as AnanSettings holds
+    // them: loaded at connect, moved by "pan.set", applied live.
+    int m_panAttackMs = 0;
+    int m_panDecayMs = 0;
 
     // The receiver audio stage as last set; emitSliceState() publishes these.
     // Retained across rate changes and reconnects (like the blanker and AGC).
