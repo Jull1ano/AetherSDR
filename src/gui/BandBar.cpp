@@ -18,13 +18,18 @@ const QString kAmateurStyle = QStringLiteral(
     "border-radius: 2px; color: #c8d8e8; font-size: 10px; font-weight: bold; "
     "padding: 0px 2px; }"
     "QPushButton:hover { background: rgba(0, 112, 192, 180); border: 1px solid #0090e0; }"
-    "QPushButton:pressed { background: rgba(0, 112, 192, 230); }");
+    "QPushButton:pressed { background: rgba(0, 112, 192, 230); }"
+    // The band the receiver is in: the hover look, held.
+    "QPushButton:checked { background: rgba(0, 112, 192, 210); border: 1px solid #30b0ff; "
+    "color: #ffffff; }");
 const QString kBroadcastStyle = QStringLiteral(
     "QPushButton { background: rgba(30, 40, 55, 220); border: 1px solid #504030; "
     "border-radius: 2px; color: #ffcc66; font-size: 10px; font-weight: bold; "
     "padding: 0px 2px; }"
     "QPushButton:hover { background: rgba(160, 110, 0, 180); border: 1px solid #e0a000; }"
-    "QPushButton:pressed { background: rgba(160, 110, 0, 230); }");
+    "QPushButton:pressed { background: rgba(160, 110, 0, 230); }"
+    "QPushButton:checked { background: rgba(160, 110, 0, 210); border: 1px solid #ffc030; "
+    "color: #ffffff; }");
 
 constexpr int kButtonHeight = 18;
 constexpr int kButtonMinWidth = 24;
@@ -49,6 +54,10 @@ BandBar::BandBar(QWidget* parent) : QWidget(parent)
         btn->setMinimumWidth(kButtonMinWidth);
         btn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         btn->setFocusPolicy(Qt::NoFocus);
+        // Checkable only to show the current band (and to report it to a
+        // screen reader as "checked"): a click never leaves the state it
+        // toggled, syncChecked() puts back what the frequency says.
+        btn->setCheckable(true);
         btn->setStyleSheet(style);
         btn->setToolTip(tip);
         btn->setAccessibleName(tip);
@@ -57,7 +66,9 @@ BandBar::BandBar(QWidget* parent) : QWidget(parent)
         const QString mode = QString::fromLatin1(e.mode);
         connect(btn, &QPushButton::clicked, this, [this, bandName, freq, mode] {
             emit bandSelected(bandName, freq, mode);
+            syncChecked();
         });
+        m_buttons.append({bandName, btn});
         row->addWidget(btn);
     };
     auto addGap = [this, row] {
@@ -84,6 +95,24 @@ BandBar::BandBar(QWidget* parent) : QWidget(parent)
         addButton(e, kAmateurStyle, QString::fromLatin1(e.label));
     }
     setFixedHeight(kButtonHeight + 2);
+}
+
+void BandBar::setCurrentFrequencyMhz(double mhz)
+{
+    const QString band = bandbuttons::buttonBandForMhz(mhz);
+    if (band == m_currentBand)
+        return;
+    m_currentBand = band;
+    syncChecked();
+}
+
+void BandBar::syncChecked()
+{
+    for (const Button& b : m_buttons) {
+        const bool current = !m_currentBand.isEmpty() && b.bandName == m_currentBand;
+        if (b.button->isChecked() != current)
+            b.button->setChecked(current);
+    }
 }
 
 }  // namespace AetherSDR

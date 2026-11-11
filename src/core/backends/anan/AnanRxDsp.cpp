@@ -140,6 +140,8 @@ AnanRxDsp::RebuildResult AnanRxDsp::buildChannel(const Config& config)
     as.framesPerSecond = config.spectrumFps;
     as.averageTimeMs = config.spectrumAverageMs;
     as.logAverage = config.spectrumLogAverage;
+    as.fftSize = config.panFftSize;
+    as.window = config.panWindow;
     auto analyzer = AnanPanAnalyzer::create(channel->channelId(), as, &result.error);
     if (!analyzer)
         return result;   // channel is released here, analyzer never existed
@@ -261,6 +263,7 @@ void AnanRxDsp::installChannel(RebuildResult result)
     result.analyzer->setNumPoints(m_config.panPoints);
     result.analyzer->setAverageTimeMs(m_config.spectrumAverageMs);
     result.analyzer->setLogAverage(m_config.spectrumLogAverage);
+    result.analyzer->setWindow(m_config.panWindow);
     // Analyzer before channel: the outgoing analyzer uses the outgoing
     // channel's id as its slot and must be destroyed before that channel
     // releases the id -- see RebuildResult.
@@ -405,6 +408,15 @@ void AnanRxDsp::setPanPoints(int points)
     // up at install.
     if (m_analyzer && !m_rebuildInFlight)
         m_analyzer->setNumPoints(m_config.panPoints);
+}
+
+void AnanRxDsp::setPanWindow(int window)
+{
+    m_config.panWindow = std::clamp(window, 0, AnanPanAnalyzer::kWindowCount - 1);
+    // Same deferral as setSpectrumRateFps(): the incoming analyzer picks it
+    // up at install.
+    if (m_analyzer && !m_rebuildInFlight)
+        m_analyzer->setWindow(m_config.panWindow);
 }
 
 void AnanRxDsp::setSpectrumLogAverage(bool on)

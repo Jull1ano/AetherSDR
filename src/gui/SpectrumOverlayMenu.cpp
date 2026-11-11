@@ -1986,7 +1986,7 @@ void SpectrumOverlayMenu::buildDisplayPanel()
     makeRow("FFT AVG:", 0, 100, 0, m_avgSlider, m_avgLabel);
     m_avgSlider->setObjectName("displayFftAvgSlider");
     connect(m_avgSlider, &QSlider::valueChanged, this, [this](int v) {
-        m_avgLabel->setText(QString::number(v));
+        m_avgLabel->setText(averageText(v));
         emit fftAverageChanged(v);
     });
 
@@ -1999,6 +1999,63 @@ void SpectrumOverlayMenu::buildDisplayPanel()
         m_fpsLabel->setText(QString::number(v));
         emit fftFpsChanged(v);
     });
+
+    // brick3-angelia: the spectrum engine's own settings, for a radio whose
+    // panadapter this host computes (an ANAN: WDSP's analyzer, as in Thetis).
+    // Hidden until MainWindow supplies the choices (setSampleRateChoices /
+    // setHostAnalyzerChoices), so other radios never see them.
+    {
+        auto makeComboRow = [&](const QString& text, QLabel*& lbl, QComboBox*& cmb,
+                                const char* objectName, const QString& tip) {
+            lbl = new QLabel(text);
+            lbl->setStyleSheet(labelStyle);
+            grid->addWidget(lbl, row, 0);
+            // Guarded: a wheel turned over the closed list scrolls the panel
+            // instead of stepping the rate or the FFT size (each a rebuild).
+            cmb = new GuardedComboBox;
+            cmb->setObjectName(QString::fromLatin1(objectName));
+            cmb->setFixedHeight(18);
+            applyComboStyle(cmb);
+            cmb->setToolTip(tip);
+            cmb->setAccessibleName(QString(text).remove(QLatin1Char(':')));
+            cmb->setAccessibleDescription(tip);
+            lbl->setBuddy(cmb);
+            grid->addWidget(cmb, row, 1, 1, 3);
+            lbl->hide();
+            cmb->hide();
+            ++row;
+        };
+        makeComboRow(tr("Rate:"), m_sampleRateLbl, m_sampleRateCmb, "displaySampleRateCombo",
+                     tr("The receiver's sample rate, which on this radio is also the "
+                        "width of spectrum shown: zooming picks one of these same "
+                        "rates. A lower rate shows less spectrum in finer detail."));
+        makeComboRow(tr("FFT Size:"), m_fftSizeLbl, m_fftSizeCmb, "displayFftSizeCombo",
+                     tr("How many samples each spectrum is computed from. Smaller "
+                        "follows signals faster and looks grainier; larger is calmer "
+                        "and finer, and slower to follow. Auto is 16384.\n"
+                        "The figure in brackets is the width of one FFT bin at the "
+                        "current rate. A size not used before takes a moment to "
+                        "prepare the first time; the spectrum keeps running "
+                        "meanwhile, and the audio drops out for a quarter of a "
+                        "second when it switches."));
+        makeComboRow(tr("Window:"), m_fftWindowLbl, m_fftWindowCmb, "displayFftWindowCombo",
+                     tr("The FFT window. Kaiser (the default) and Blackman-Harris 7 "
+                        "keep strong signals from smearing into their neighbours; "
+                        "Hann and Hamming are sharper but leak more; Flat Top reads "
+                        "peak levels most accurately and is the widest."));
+        connect(m_sampleRateCmb, QOverload<int>::of(&QComboBox::activated), this,
+                [this](int idx) {
+            emit sampleRateRequested(m_sampleRateCmb->itemData(idx).toInt());
+        });
+        connect(m_fftSizeCmb, QOverload<int>::of(&QComboBox::activated), this,
+                [this](int idx) {
+            emit hostFftSizeChanged(m_fftSizeCmb->itemData(idx).toInt());
+        });
+        connect(m_fftWindowCmb, QOverload<int>::of(&QComboBox::activated), this,
+                [this](int idx) {
+            emit hostFftWindowChanged(m_fftWindowCmb->itemData(idx).toInt());
+        });
+    }
 
     // Smooth — display-only smoothing across frequency, in linear power (the
     // panadapter's counterpart of the AetherRX/TX EQ's Smoothing). The value
@@ -2753,6 +2810,115 @@ void SpectrumOverlayMenu::applyAutoBlackMode(int mode, bool emitSignals)
     }
 }
 
+QString SpectrumOverlayMenu::averageText(int steps) const
+{
+    if (m_avgStepMs <= 0)
+        return QString::number(steps);
+    return steps <= 0 ? tr("Off") : tr("%1 ms").arg(steps * m_avgStepMs);
+}
+
+void SpectrumOverlayMenu::setFftAverageStepMs(int ms)
+{
+    m_avgStepMs = ms > 0 ? ms : 0;
+    if (m_avgSlider && m_avgLabel)
+        m_avgLabel->setText(averageText(m_avgSlider->value()));
+}
+
+void SpectrumOverlayMenu::setWeightedAverageLabel(const QString& label)
+{
+    if (m_weightedAvgBtn)
+        m_weightedAvgBtn->setText(label.isEmpty() ? QStringLiteral("Wt Avg") : label);
+}
+
+void SpectrumOverlayMenu::setSampleRateChoices(const QVector<int>& ratesHz, int currentHz)
+{
+    if (!m_sampleRateCmb)
+        return;
+    {
+        const QSignalBlocker block(m_sampleRateCmb);
+        m_sampleRateCmb->clear();
+        for (const int hz : ratesHz) {
+            m_sampleRateCmb->addItem(hz % 1000 == 0 ? tr("%1 kHz").arg(hz / 1000)
+                                                    : tr("%1 Hz").arg(hz), hz);
+        }
+    }
+    const bool show = !ratesHz.isEmpty();
+    m_sampleRateLbl->setVisible(show);
+    m_sampleRateCmb->setVisible(show);
+    setCurrentSampleRateHz(currentHz);
+}
+
+void SpectrumOverlayMenu::setCurrentSampleRateHz(int hz)
+{
+    // No span reported yet (hz 0): keep what is shown.
+    if (!m_sampleRateCmb || m_sampleRateCmb->count() == 0 || hz <= 0)
+        return;
+    // The nearest offered rate: the span is reported in MHz and may not
+    // round-trip to the exact integer.
+    int best = -1;
+    int bestDistance = 0;
+    for (int i = 0; i < m_sampleRateCmb->count(); ++i) {
+        const int distance = std::abs(m_sampleRateCmb->itemData(i).toInt() - hz);
+        if (best < 0 || distance < bestDistance) {
+            best = i;
+            bestDistance = distance;
+        }
+    }
+    if (best >= 0 && best != m_sampleRateCmb->currentIndex()) {
+        const QSignalBlocker block(m_sampleRateCmb);
+        m_sampleRateCmb->setCurrentIndex(best);
+    }
+    refreshFftSizeTexts();
+}
+
+void SpectrumOverlayMenu::refreshFftSizeTexts()
+{
+    if (!m_fftSizeCmb)
+        return;
+    const int rateHz = (m_sampleRateCmb && m_sampleRateCmb->currentIndex() >= 0)
+        ? m_sampleRateCmb->currentData().toInt() : 0;
+    for (int i = 0; i < m_fftSizeCmb->count(); ++i) {
+        const int size = m_fftSizeCmb->itemData(i).toInt();
+        QString text = size <= 0 ? tr("Auto") : QString::number(size);
+        if (size > 0 && rateHz > 0) {
+            const double binHz = static_cast<double>(rateHz) / size;
+            text += tr("  (%1 Hz)").arg(binHz, 0, 'f', binHz < 10.0 ? 1 : 0);
+        }
+        m_fftSizeCmb->setItemText(i, text);
+    }
+}
+
+void SpectrumOverlayMenu::setHostAnalyzerChoices(const QVector<int>& fftSizes, int fftSize,
+                                                 const QStringList& windows, int window)
+{
+    if (!m_fftSizeCmb || !m_fftWindowCmb)
+        return;
+    {
+        const QSignalBlocker block(m_fftSizeCmb);
+        m_fftSizeCmb->clear();
+        if (!fftSizes.isEmpty()) {
+            m_fftSizeCmb->addItem(tr("Auto"), 0);
+            for (const int size : fftSizes)
+                m_fftSizeCmb->addItem(QString::number(size), size);
+            const int index = m_fftSizeCmb->findData(fftSize);
+            m_fftSizeCmb->setCurrentIndex(index >= 0 ? index : 0);
+        }
+    }
+    {
+        const QSignalBlocker block(m_fftWindowCmb);
+        m_fftWindowCmb->clear();
+        for (int i = 0; i < windows.size(); ++i)
+            m_fftWindowCmb->addItem(windows.at(i), i);
+        if (window >= 0 && window < windows.size())
+            m_fftWindowCmb->setCurrentIndex(window);
+    }
+    m_fftSizeLbl->setVisible(!fftSizes.isEmpty());
+    m_fftSizeCmb->setVisible(!fftSizes.isEmpty());
+    m_fftWindowLbl->setVisible(!windows.isEmpty());
+    m_fftWindowCmb->setVisible(!windows.isEmpty());
+    refreshFftSizeTexts();
+}
+
 void SpectrumOverlayMenu::setFftAverageDescriptions(const QString& average, const QString& weighted)
 {
     if (m_avgSlider) {
@@ -2793,7 +2959,7 @@ void SpectrumOverlayMenu::syncDisplaySettings(int avg, int fps, int fillPct,
     setKiwiWaterfallControlMode(false);
 
     m_avgSlider->setValue(avg);
-    m_avgLabel->setText(QString::number(avg));
+    m_avgLabel->setText(averageText(avg));
     m_fpsSlider->setValue(fps);
     m_fpsLabel->setText(QString::number(fps));
     m_fillSlider->setValue(fillPct);
@@ -3051,7 +3217,7 @@ void SpectrumOverlayMenu::syncPanProcessingSettings(int avg, int fps,
     const QSignalBlocker fpsBlocker(m_fpsSlider);
     const QSignalBlocker weightedBlocker(m_weightedAvgBtn);
     m_avgSlider->setValue(avg);
-    m_avgLabel->setText(QString::number(avg));
+    m_avgLabel->setText(averageText(avg));
     m_fpsSlider->setValue(fps);
     m_fpsLabel->setText(QString::number(fps));
     m_weightedAvgBtn->setChecked(weightedAvg);

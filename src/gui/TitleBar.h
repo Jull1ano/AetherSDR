@@ -29,6 +29,7 @@ namespace AetherSDR {
 
 class BrandMark;
 class PersistentDialog;
+class TitleFrequencyReadout;
 class WindowCaptionButtons;
 
 class TitleBar : public QWidget {
@@ -137,6 +138,9 @@ public:
     RadioTabBar* radioTabBar() const { return m_radioTabs; }
 
     WindowCaptionButtons* captionButtons() const { return m_captionButtons; }
+    // brick3-angelia: the active receiver's frequency, mid-bar; scroll a digit
+    // or click to type. MainWindow feeds it and routes what it emits.
+    TitleFrequencyReadout* frequencyReadout() const { return m_freqReadout; }
 
     // Introspection for the automation bridge (`titlebar` model): the whole
     // bar — geometry, brand, tabs, audio cluster, window controls.
@@ -217,6 +221,7 @@ private:
     void refreshUpdateBadge();
     QLabel*      m_otherTxLabel{nullptr};
     QPushButton* m_mfBtn{nullptr};
+    TitleFrequencyReadout* m_freqReadout{nullptr};
     QPushButton* m_pcBtn{nullptr};
     QPushButton* m_speakerBtn{nullptr};
     QPushButton* m_headphoneBtn{nullptr};

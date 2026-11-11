@@ -42,7 +42,7 @@ Configure the receive front end under **Settings → Radio Setup... → Radio �
 ## Receiving with the G2
 
 - **Receive** with live tuning and zoom. Changing the zoom changes the DDC rate live, without rebuilding the session.
-- **Panadapter** computed by WDSP's display analyzer: a ≥16384-point windowed FFT at one point per screen pixel. **FFT AVG** and **Wt Avg** drive it, and noise-floor auto-adjust works.
+- **Panadapter** computed by WDSP's display analyzer: a ≥16384-point windowed FFT at one point per screen pixel. **FFT AVG** and **Wt Avg** (shown as **Log Avg**) drive it, and noise-floor auto-adjust works. The Display panel also offers the sample **Rate**, the **FFT Size** (4096–65536) and the FFT **Window**.
 - **S-meter.**
 - **NB** cycles Off → **NB** → **NB2** → Off: WDSP's two impulse blankers, run on this computer before the demodulator. **NB** silences each impulse; **NB2** reconstructs the blanked window from the samples either side, and shows an **NB2** fill selector (**Zero**, **Sample hold**, **Mean hold**, **Hold sample** or **Interpolate**) while it runs. Neither is offered in FM.
 - **AGC-T** sets the AGC's maximum gain from −20 to 120 dB, 1.4 dB per slider step, starting at 71 (79.4 dB). With AGC off it sets the fixed gain instead, starting at 29 (20.6 dB). The slider's tooltip shows the gain in dB.

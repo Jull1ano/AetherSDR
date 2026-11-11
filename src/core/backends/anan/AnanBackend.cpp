@@ -546,6 +546,28 @@ RadioCapabilities AnanBackend::capabilities() const
     // ("anan" "nr2.set"), as Thetis runs it -- not the client's SpectralNR.
     c.hostNoiseReduction2 = RadioCapabilities::HostNoiseReduction2{
         QStringLiteral("anan"), QStringLiteral("nr2.set")};
+    // brick3-angelia: the operator picks the analyzer's FFT size and window
+    // ("anan" "pan.set"). Window names in WDSP's own numbering.
+    {
+        RadioCapabilities::HostPanAnalyzer analyzer;
+        analyzer.extensionNamespace = QStringLiteral("anan");
+        analyzer.verb = QStringLiteral("pan.set");
+        for (int size = AnanPanAnalyzer::kSmallestFftSize;
+             size <= AnanPanAnalyzer::kMaxFftSize; size *= 2) {
+            analyzer.fftSizes.append(size);
+        }
+        analyzer.windows = {QStringLiteral("Rectangular"),
+                            QStringLiteral("Blackman-Harris 4"),
+                            QStringLiteral("Hann"),
+                            QStringLiteral("Flat Top"),
+                            QStringLiteral("Hamming"),
+                            QStringLiteral("Kaiser"),
+                            QStringLiteral("Blackman-Harris 7")};
+        analyzer.fftSize = m_panFftSize;
+        analyzer.window = m_panWindow;
+        analyzer.weightedAverageLabel = QStringLiteral("Log Avg");
+        c.hostPanAnalyzer = analyzer;
+    }
     c.manufacturer = QStringLiteral("Apache Labs");
     c.model = QString::fromLatin1(anan::ananModelForBoard(m_discoveredBoardId));
     // The session takes its receive front-end options from AnanSettings
@@ -613,7 +635,13 @@ RadioCapabilities AnanBackend::capabilities() const
     c.hasDdcPanEdgeRolloff = true; // see RadioCapabilities.h's own comment
     // The client keeps FFT AVG, weighted averaging and FFT FPS per radio, as
     // for the HL2: nothing on the radio holds them (brick3-angelia).
-    c.backendPanAveraging = BackendPanAveraging{kMsPerAverageStep, true, {}, {}}; // AnanPanAnalyzer
+    c.backendPanAveraging = BackendPanAveraging{   // AnanPanAnalyzer
+        kMsPerAverageStep, true,
+        QStringLiteral("Spectrum averaging time, the analyzer's own (Thetis: Time). "
+                       "Longer is smoother and slower to follow; Off is unaveraged."),
+        QStringLiteral("On: log-recursive averaging, the smooth look (Thetis: Log "
+                       "Recursive). Off: linear recursive, which reads noise and weak "
+                       "signals at their true power (Thetis: Recursive).")};
     c.panFrameRateShaping = PanFrameRateShaping{/*clientPersistsFrameRate*/ true};
     // No protocol field holds a waterfall rate: the client keeps it.
     c.panWaterfallRateShaping =
@@ -841,6 +869,15 @@ void AnanBackend::connectRadio(const RadioConnectRequest& request)
         m_autoAgcTimer->start();
     else
         m_autoAgcTimer->stop();
+    // brick3-angelia: the analyzer's FFT size and window as the operator
+    // left them. Defaults match AnanSettings' own, for a connect that never
+    // populated them.
+    m_panFftSize = sanitizedPanFftSize(
+        request.params.value(QStringLiteral("anan.panFftSize"), 0).toInt());
+    m_panWindow = std::clamp(
+        request.params.value(QStringLiteral("anan.panWindow"),
+                             AnanPanAnalyzer::kDefaultWindow).toInt(),
+        0, AnanPanAnalyzer::kWindowCount - 1);
     // applyRestoredState() seeds both ADC values before this connect.
     m_attenuationDb = m_pendingParams.rx1AdcIndex == 1
         ? m_pendingParams.adc1AttenuationDb
@@ -886,6 +923,8 @@ void AnanBackend::connectRadio(const RadioConnectRequest& request)
     // default until RadioModel pushes the operator's rate through
     // setPanFrameRate().
     m_pendingDspConfig.panPoints = m_panPoints;
+    m_pendingDspConfig.panFftSize = m_panFftSize;
+    m_pendingDspConfig.panWindow = m_panWindow;
     // The AGC as applyRestoredState() set it for this radio, and the NB request
     // this backend retains across reconnects. emitSliceState() also supplies
     // them if a different radio requires a fresh slice.
@@ -1384,6 +1423,18 @@ void AnanBackend::setPanCenter(const QString& panId, double hz, PanCenterIntent 
     }, Qt::QueuedConnection);
 }
 
+int AnanBackend::sanitizedPanFftSize(int requested) noexcept
+{
+    // 0 (or anything below) is "automatic"; otherwise the next power of two
+    // inside the analyzer's range.
+    if (requested <= 0)
+        return 0;
+    int size = AnanPanAnalyzer::kSmallestFftSize;
+    while (size < requested && size < AnanPanAnalyzer::kMaxFftSize)
+        size *= 2;
+    return size;
+}
+
 int AnanBackend::nearestDdc0RateKsps(int requestedKsps) noexcept
 {
     // The DDC runs at exactly one of these rates (no continuous zoom). Nearest by RATIO
@@ -1785,6 +1836,57 @@ void AnanBackend::invokeExtension(const QString& ns, const QString& verb,
         }
         if (requestId != 0) {
             emit extensionResult(requestId, QVariantMap{{QStringLiteral("ok"), true}});
+        }
+        return;
+    }
+    if (ns == QLatin1String("anan") && verb == QLatin1String("pan.set")) {
+        // brick3-angelia: the panadapter analyzer's FFT size and window.
+        // Partial, like "frontend.set": only the named fields move. Both are
+        // persisted here (AnanSettings), so the next connect starts with them.
+        const QVariantMap fields = arg.toMap();
+        if (fields.contains(QStringLiteral("window"))) {
+            const int window = std::clamp(fields.value(QStringLiteral("window")).toInt(),
+                                          0, AnanPanAnalyzer::kWindowCount - 1);
+            if (window != m_panWindow) {
+                m_panWindow = window;
+                m_pendingDspConfig.panWindow = window;
+                AnanSettings::setPanWindow(window);
+                // Live: the same FFT, new coefficients -- nothing is planned.
+                if (m_dsp) {
+                    QMetaObject::invokeMethod(m_dsp, "setPanWindow", Qt::QueuedConnection,
+                                              Q_ARG(int, window));
+                }
+            }
+        }
+        if (fields.contains(QStringLiteral("fftSize"))) {
+            const int size = sanitizedPanFftSize(fields.value(QStringLiteral("fftSize")).toInt());
+            if (size != m_panFftSize) {
+                m_panFftSize = size;
+                m_pendingDspConfig.panFftSize = size;
+                AnanSettings::setPanFftSize(size);
+                // A new FFT size is planned FFTW_PATIENT, which may not run on
+                // the thread that feeds the receiver: rebuild the channel and
+                // its analyzer on the build thread, exactly as a zoom does --
+                // beginRateChange() at the rate already running. The running
+                // display and audio carry on until the swap (a 250 ms mute).
+                // A size never planned before can take a while the first
+                // time; FFTW's wisdom cache makes it instant afterwards.
+                if (m_connected) {
+                    const int rateKsps = m_pendingParams.rx1RateKsps;
+                    if (!m_rateChanging)
+                        beginRateChange(rateKsps);
+                    else if (m_pendingBandwidthKsps == 0)
+                        m_pendingBandwidthKsps = rateKsps;
+                    // else: a zoom is already queued behind the running
+                    // rebuild, and its build reads m_pendingDspConfig too.
+                }
+            }
+        }
+        if (requestId != 0) {
+            emit extensionResult(requestId, QVariantMap{
+                {QStringLiteral("ok"), true},
+                {QStringLiteral("fftSize"), m_panFftSize},
+                {QStringLiteral("window"), m_panWindow}});
         }
         return;
     }

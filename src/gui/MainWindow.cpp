@@ -32,6 +32,8 @@
 #include "ClientDisconnectDialog.h"
 #include "ConnectedStationsDialog.h"
 #include "TitleBar.h"
+#include "TitleFrequencyReadout.h"
+#include "BandBar.h"
 #include "UpdatesWindow.h"
 #include "core/UpdateController.h"
 #include "WindowCaptionButtons.h"
@@ -5533,6 +5535,33 @@ void MainWindow::buildUI()
             this, &MainWindow::showMultiFlexDialog);
     connect(m_titleBar, &TitleBar::updateBadgeClicked,
             this, [this] { showUpdatesWindow(false); });
+    // brick3-angelia: the mid-bar frequency readout tunes the active slice
+    // through the same path as the VFO flag: a wheeled digit like the flag's
+    // wheel, a typed frequency like its direct entry.
+    if (auto* readout = m_titleBar->frequencyReadout()) {
+        // The readout shows a wheel step at once; if the tune was refused
+        // (locked slice, out of range) no report follows to correct it.
+        auto resyncSoon = [this] {
+            QTimer::singleShot(600, this, [this] {
+                auto* s = activeSlice();
+                showActiveSliceFrequency(s ? s->frequency() : 0.0);
+            });
+        };
+        connect(readout, &TitleFrequencyReadout::stepTuneRequested, this,
+                [this, resyncSoon](double mhz) {
+            if (auto* s = activeSlice())
+                applyTuneRequest(s, mhz, TuneIntent::IncrementalTune, "titlebar-wheel");
+            resyncSoon();
+        });
+        connect(readout, &TitleFrequencyReadout::directEntryCommitted, this,
+                [this, resyncSoon](double mhz) {
+            if (auto* s = activeSlice()) {
+                applyTuneRequest(s, mhz, TuneIntent::CommandedTargetCenter,
+                                 "titlebar-direct-entry");
+            }
+            resyncSoon();
+        });
+    }
     restoreKnownUpdate();
     connect(m_titleBar, &TitleBar::minimalModeRequested,
             this, &MainWindow::toggleMinimalModeFromAction);
@@ -8834,6 +8863,8 @@ void MainWindow::setActiveSliceInternal(int sliceId, bool revealOffscreen)
 
     // Keep the mini-pan centred on the active VFO (rebind to the new slice).
     refreshMiniPanFollow();
+    // ...and the title bar's frequency readout and the band bars' lit button.
+    rebindActiveFrequencyDisplays();
 
     // Send "slice set N active=1" only when switching to a different slice
     // (matches SmartSDR pcap — sent on VFO flag click, not on every tune).
@@ -9092,6 +9123,35 @@ void MainWindow::refreshMiniPanFollow()
     });
     applet->setVfoMhz(s->frequency());
     applet->setPassbandHz(s->filterLow(), s->filterHigh());
+}
+
+// brick3-angelia: the title bar's frequency readout and every band bar's lit
+// button show the active slice, however it was tuned.
+void MainWindow::rebindActiveFrequencyDisplays()
+{
+    disconnect(m_activeFreqDisplayConn);
+    auto* s = activeSlice();
+    if (!s) {
+        showActiveSliceFrequency(0.0);
+        return;
+    }
+    m_activeFreqDisplayConn = connect(s, &SliceModel::frequencyChanged, this,
+                                      [this](double mhz) { showActiveSliceFrequency(mhz); });
+    showActiveSliceFrequency(s->frequency());
+}
+
+void MainWindow::showActiveSliceFrequency(double mhz)
+{
+    if (m_titleBar) {
+        if (auto* readout = m_titleBar->frequencyReadout())
+            readout->setFrequencyMhz(mhz);
+    }
+    if (m_panStack) {
+        for (auto* applet : m_panStack->allApplets()) {
+            if (auto* bar = applet ? applet->bandBar() : nullptr)
+                bar->setCurrentFrequencyMhz(mhz);
+        }
+    }
 }
 
 void MainWindow::teardownMiniPanFeed()

@@ -594,6 +594,11 @@ private:
     // MiniPanApplet::feedWanted wiring in MainWindow_Session.cpp.
     MiniPanApplet* miniPanApplet() const;   // null until the applet panel is built
     void refreshMiniPanFollow();   // rebind readout/passband to the active slice
+    // brick3-angelia: the title bar's frequency readout and the band bars'
+    // lit button follow the active slice. rebind on an active-slice change
+    // (no slice blanks both); show pushes one frequency to both.
+    void rebindActiveFrequencyDisplays();
+    void showActiveSliceFrequency(double mhz);
     void teardownMiniPanFeed();    // unbind + blank the trace
     // Re-slice one main-pan FFT frame into the mini-pan's window.
     void feedMiniPanFromPanFrame(const PanadapterModel* pan,
@@ -1699,6 +1704,7 @@ private:
     QAction*             m_workspaceEditAction{nullptr};
     bool                 m_statusMessageMirrorWired{false};
     QMetaObject::Connection m_miniPanFreqConn;    // active-slice freq → mini-pan centre
+    QMetaObject::Connection m_activeFreqDisplayConn;  // → title readout + band bars
     QMetaObject::Connection m_miniPanFiltConn;    // active-slice filter → mini-pan passband
     bool m_miniPanFeedWanted{false};              // applet visible → consume frames
     QPointer<PanadapterApplet> m_panApplet;  // backward compat alias to active applet

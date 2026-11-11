@@ -19,6 +19,7 @@
 #include <QStatusBar>
 
 #include "AetherDspWidget.h"
+#include "ClientRxDspApplet.h"
 #include "VoiceModeGate.h"   // isCwMode() — one CW-mode list, not thirteen
 #include "BandRecallSliceSelectionPolicy.h"
 #include "models/BandPlanManager.h"
@@ -2772,6 +2773,7 @@ void MainWindow::onSliceRemoved(int id)
             m_activeSliceId = -1;
             if (m_ax25HfPacketDecodeDialog)
                 m_ax25HfPacketDecodeDialog->setAttachedSlice(nullptr);
+            rebindActiveFrequencyDisplays();   // no active slice: blank them
             refreshMiniPanFollow();   // no active slice → blank the mini-pan readout/passband
             // No slice left: refresh the indicator row
             // (setActiveSliceInternal() does it on the re-select branch). Refresh
@@ -3443,6 +3445,15 @@ void MainWindow::wirePanDisplayStatus(PanadapterApplet* applet,
                 sw->setWfLineDuration(lineDurationMs);
             }
         }));
+    // brick3-angelia: the display panel's Rate row follows the span, however
+    // it changed (zoom, a band button, the row itself).
+    if (SpectrumOverlayMenu* rateMenu = sw->overlayMenu()) {
+        connections.append(connect(
+            pan, &PanadapterModel::infoChanged,
+            rateMenu, [rateMenu](double, double bandwidthMhz) {
+                rateMenu->setCurrentSampleRateHz(qRound(bandwidthMhz * 1e6));
+            }));
+    }
     m_panDisplayStatusConnections.insert(panId, connections);
 
     // When the engine shapes the frame rate, seed the shaper from the widget's
@@ -3451,10 +3462,27 @@ void MainWindow::wirePanDisplayStatus(PanadapterApplet* applet,
     // (core/WaterfallRate.h; they differ >10x mid-slider), unconditionally so a
     // switch back to Flex resets it.
     sw->setWfRateShapedLocally(m_radioModel.shapesDisplayRatesLocally());
-    const auto averaging = m_radioModel.backendCapabilities().backendPanAveraging;
+    const RadioCapabilities displayCaps = m_radioModel.backendCapabilities();
+    const auto averaging = displayCaps.backendPanAveraging;
     if (SpectrumOverlayMenu* menu = sw->overlayMenu()) {
         menu->setFftAverageDescriptions(averaging ? averaging->averageDescription : QString{},
                                        averaging ? averaging->weightedDescription : QString{});
+        // brick3-angelia: FFT AVG reads in milliseconds where a step is a
+        // time, and the spectrum engine's own rows appear for a radio whose
+        // span is its sample rate and whose analyzer runs in this host.
+        menu->setFftAverageStepMs(averaging ? averaging->msPerAverageStep : 0);
+        const bool rateIsSpan = displayCaps.panSpanModel
+                                && displayCaps.panSpanModel->followsSampleRate;
+        menu->setSampleRateChoices(rateIsSpan ? displayCaps.sampleRatesHz : QVector<int>{},
+                                   qRound(pan->bandwidthMhz() * 1e6));
+        if (const auto& analyzer = displayCaps.hostPanAnalyzer) {
+            menu->setHostAnalyzerChoices(analyzer->fftSizes, analyzer->fftSize,
+                                         analyzer->windows, analyzer->window);
+            menu->setWeightedAverageLabel(analyzer->weightedAverageLabel);
+        } else {
+            menu->setHostAnalyzerChoices({}, 0, {}, 0);
+            menu->setWeightedAverageLabel({});
+        }
     }
     if (m_radioModel.shapesDisplayRatesLocally()) {
         if (averaging && averaging->clientPersistsAveraging) {
@@ -3715,18 +3743,22 @@ int MainWindow::cloneDisplaySettingsToAllPans(PanadapterApplet* source)
     return cloned;
 }
 
-// brick3-angelia: which band a frequency's zoom belongs to -- the amateur
-// band (BandSettings), else the broadcast band (BroadcastBandPolicy), else GEN.
+// brick3-angelia: which band a frequency's zoom and last position belong to.
+// Same order as the band bar's lit button (bandbuttons::buttonBandForMhz):
+// the broadcast band (BroadcastBandPolicy) first -- 7.2-7.3 MHz is 41 m in
+// Region 1 -- then the amateur band (BandSettings), then CB, else GEN.
 QString MainWindow::bandZoomKeyForMhz(double mhz)
 {
-    const QString amateur = BandSettings::bandForFrequency(mhz);
-    if (amateur != QLatin1String("GEN"))
-        return amateur;
     const double hz = mhz * 1e6;
     for (const broadcast::Band& b : broadcast::kBands) {
         if (hz >= b.lowHz && hz < b.highHz)
             return QStringLiteral("BC-") + QString::fromLatin1(b.name);
     }
+    const QString amateur = BandSettings::bandForFrequency(mhz);
+    if (amateur != QLatin1String("GEN"))
+        return amateur;
+    if (bandbuttons::isCbMhz(mhz))
+        return QStringLiteral("CB");
     return QStringLiteral("GEN");
 }
 
@@ -3952,6 +3984,9 @@ void MainWindow::wirePanadapter(PanadapterApplet* applet)
                 [this, applet](const QString& bandName, double freqMhz, const QString& mode) {
             selectBand(applet->panId(), bandName, freqMhz, mode);
         });
+        // A bar built after the slice was activated starts on its band.
+        if (auto* active = activeSlice())
+            bar->setCurrentFrequencyMhz(active->frequency());
     }
     const quint64 rangeWiringEpoch = sw->advanceDbmRangeWireEpoch();
     if (!sw->capturePlacementAction()) {
@@ -4971,6 +5006,39 @@ void MainWindow::wirePanadapter(PanadapterApplet* applet)
     // ── Per-pan display controls → radio commands ────────────────────────
     // Each pan's overlay sends commands with its own panId/wfId, not the
     // global active pan. This ensures display settings work independently.
+    // brick3-angelia: the Rate / FFT Size / Window rows. Dropped first: a
+    // placeholder pan is wired again when it becomes the first real pan, and
+    // a doubled FFT-size request would rebuild the receiver twice.
+    disconnect(menu, &SpectrumOverlayMenu::sampleRateRequested, this, nullptr);
+    disconnect(menu, &SpectrumOverlayMenu::hostFftSizeChanged, this, nullptr);
+    disconnect(menu, &SpectrumOverlayMenu::hostFftWindowChanged, this, nullptr);
+    connect(menu, &SpectrumOverlayMenu::sampleRateRequested,
+            this, [this, applet](int hz) {
+        // On these radios the rate is the span: the same request as a zoom.
+        if (hz > 0)
+            m_radioModel.requestPanBandwidth(applet->panId(), hz / 1e6);
+    });
+    auto sendHostAnalyzer = [this](const QString& field, int value) {
+        const RadioCapabilities caps = m_radioModel.backendCapabilities();
+        if (!m_radioModel.isConnected() || !caps.hostPanAnalyzer)
+            return false;
+        m_radioModel.invokeBackendExtension(caps.hostPanAnalyzer->extensionNamespace,
+                                            caps.hostPanAnalyzer->verb, 0,
+                                            QVariantMap{{field, value}});
+        return true;
+    };
+    connect(menu, &SpectrumOverlayMenu::hostFftSizeChanged,
+            this, [this, sendHostAnalyzer](int size) {
+        if (sendHostAnalyzer(QStringLiteral("fftSize"), size)) {
+            statusBar()->showMessage(
+                tr("Preparing the new FFT size - the spectrum switches when it is ready"),
+                6000);
+        }
+    });
+    connect(menu, &SpectrumOverlayMenu::hostFftWindowChanged,
+            this, [sendHostAnalyzer](int window) {
+        sendHostAnalyzer(QStringLiteral("window"), window);
+    });
     connect(menu, &SpectrumOverlayMenu::fftAverageChanged,
             this, [this, applet, sw](int v) {
         sw->setFftAverage(v);
@@ -6479,6 +6547,8 @@ void MainWindow::wireVfoWidget(VfoWidget* w, SliceModel* s)
                              || m_audio->dfnrEnabled() || m_audio->rn2Enabled()
                              || m_audio->nvAfxEnabled() || m_audio->nnrEnabled();
             w->setAetherDspActive(active);
+            // brick3-angelia: the flag's quick NR row lights the running method.
+            w->setClientNrActive(activeAetherDspMethod());
         };
         connect(m_audio, &AudioEngine::nr2EnabledChanged,  w, [syncAetherDsp](bool){ syncAetherDsp(); });
         connect(m_audio, &AudioEngine::nr4EnabledChanged,  w, [syncAetherDsp](bool){ syncAetherDsp(); });
@@ -6488,6 +6558,53 @@ void MainWindow::wireVfoWidget(VfoWidget* w, SliceModel* s)
         connect(m_audio, &AudioEngine::nvAfxEnabledChanged, w, [syncAetherDsp](bool){ syncAetherDsp(); });
         connect(m_audio, &AudioEngine::nnrEnabledChanged,   w, [syncAetherDsp](bool){ syncAetherDsp(); });
         syncAetherDsp();  // apply current state to this freshly-wired slice
+
+        // brick3-angelia: the quick NR row under the launchers. What can run
+        // here is read from the AetherRX applet's own selector (build flags,
+        // GPU, compressed audio), once for the dimmed look and again at the
+        // click, since NR2's answer can change while connected.
+        auto methodState = [this](const QString& method) {
+            auto* applet = m_appletPanel ? m_appletPanel->clientRxDspApplet() : nullptr;
+            auto* selector = applet ? applet->widget() : nullptr;
+            return selector ? selector->methodState(method) : AetherDspWidget::MethodState{};
+        };
+        for (const char* method : {"NR2", "NR4", "MNR", "DFNR", "RN2", "BNR", "NNR"}) {
+            const QString name = QString::fromLatin1(method);
+            const AetherDspWidget::MethodState state = methodState(name);
+            // NR2's availability moves with the audio path; leave it enabled
+            // and let the click answer.
+            if (name != QLatin1String("NR2"))
+                w->setClientNrAvailable(name, state.selectable, state.toolTip);
+        }
+        connect(w, &VfoWidget::clientNrToggled, this,
+                [this, w, methodState](const QString& method, bool on) {
+            if (!m_audio)
+                return;
+            const QPointer<VfoWidget> flag(w);
+            // Whatever happens, the row ends up showing what the engine runs:
+            // a refused or failed switch must not leave a button lit.
+            auto resync = [this, flag] {
+                if (flag)
+                    flag->setClientNrActive(activeAetherDspMethod());
+            };
+            if (on) {
+                const AetherDspWidget::MethodState state = methodState(method);
+                if (!state.selectable) {
+                    statusBar()->showMessage(
+                        state.toolTip.isEmpty()
+                            ? tr("%1 is not available here").arg(method)
+                            : state.toolTip.section(QLatin1Char('\n'), 0, 0),
+                        5000);
+                    resync();
+                    return;
+                }
+            }
+            // The operator's own choice: the CW/digital mode policy must not
+            // switch it straight back.
+            m_aetherDspModePolicy.noteUserOverride();
+            setAetherDspMethodEnabled(method, on);
+            QTimer::singleShot(400, this, resync);
+        });
     }
 
     // AetherVoice button on the per-slice DSP tab — toggles the Aetherial

@@ -104,8 +104,9 @@ These are the actions you can bind in **Settings → Configure Shortcuts...**, w
 |---|---|---|---|
 | AF Gain Up | `af_gain_up` | `Up` |   |
 | AF Gain Down | `af_gain_down` | `Down` |   |
-| Mute Toggle | `mute_toggle` | `M` |   |
+| Mute Toggle | `mute_toggle` |   |   |
 | Mute All Slices | `mute_all_slices_toggle` |   |   |
+| PC Audio Toggle (mute) | `pc_audio_toggle` | `M` |   |
 | Master Mute Toggle | `master_mute_toggle` |   |   |
 | Master Volume Up | `master_volume_up` |   | Repeats while held |
 | Master Volume Down | `master_volume_down` |   | Repeats while held |

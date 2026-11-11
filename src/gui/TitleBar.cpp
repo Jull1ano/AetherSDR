@@ -10,6 +10,7 @@
 #include "PersistentDialog.h"
 #include "RadioTabBar.h"
 #include "ReleaseTagText.h"
+#include "TitleFrequencyReadout.h"
 #include "WindowCaptionButtons.h"
 #include "core/NetworkDiagnostics.h"
 #include "core/AppSettings.h"
@@ -285,6 +286,13 @@ TitleBar::TitleBar(QWidget* parent)
     m_hbox->addWidget(m_mfBtn);
 
     // ── 4. Spacer ───────────────────────────────────────────────────────────
+    // brick3-angelia: the frequency readout sits in the middle of the
+    // spacer. Equal gutters either side keep it centred in the free stretch
+    // between the tabs and the audio cluster. It is a control (wheel, click
+    // to type), so it is not a drag handle; the gutters still move the window.
+    m_hbox->addWidget(makeDragGutter(), 1);
+    m_freqReadout = new TitleFrequencyReadout(this);
+    m_hbox->addWidget(m_freqReadout, 0, Qt::AlignVCenter);
     m_hbox->addWidget(makeDragGutter(), 1);
 
     // ── 5. Audio cluster ────────────────────────────────────────────────────
@@ -1779,6 +1787,7 @@ void TitleBar::setMinimalMode(bool on)
     // radio-link indicator now, and minimal mode is exactly when an operator
     // has nothing else on screen that would show them a dropped link.
     if (m_radioTabs) m_radioTabs->setCompactMode(on);
+    if (m_freqReadout) m_freqReadout->setVisible(!on);
     m_pcBtn->setVisible(!on);
     m_speakerBtn->setVisible(!on);
     m_headphoneBtn->setVisible(!on);

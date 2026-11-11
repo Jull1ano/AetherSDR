@@ -855,6 +855,27 @@ struct RadioCapabilities {
         QString verb;
     };
     std::optional<HostNoiseReduction2> hostNoiseReduction2;
+    // The panadapter is computed by an analyzer in this host whose FFT size
+    // and window the operator may choose (ANAN: WDSP's display analyzer, the
+    // one Thetis draws with) (brick3-angelia). The client offers `fftSizes`
+    // (plus automatic) and `windows` and sends a change as
+    // invokeExtension(extensionNamespace, verb, {fftSize, window}); either
+    // field may be sent alone. The backend persists both and reports the
+    // values in force here. Absent: the display offers neither control.
+    struct HostPanAnalyzer {
+        QString extensionNamespace;
+        QString verb;
+        // Sizes on offer, ascending. 0, "automatic", is always offered too.
+        QVector<int> fftSizes;
+        // Window names; a window is sent as its index in this list.
+        QStringList windows;
+        int fftSize = 0;   // in force; 0 = automatic
+        int window = 0;    // in force
+        // What the weighted-average toggle selects on this analyzer, as a
+        // short button label. Empty keeps the display's own wording.
+        QString weightedAverageLabel;
+    };
+    std::optional<HostPanAnalyzer> hostPanAnalyzer;
     // The gain the AGC-T knob (0..100) sets: offsetDb + dbPerStep * knob, both
     // as the AGC's maximum gain and, with AGC off, as its fixed gain. The AGC-T
     // tooltips show it. Absent: no mapping declared, and the tooltips show the

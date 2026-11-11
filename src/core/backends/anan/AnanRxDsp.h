@@ -71,6 +71,12 @@ public:
         // Log-recursive (true) or linear-recursive (false) averaging; kept
         // current by setSpectrumLogAverage().
         bool spectrumLogAverage = true;
+        // brick3-angelia: the operator's FFT size (0 = automatic) and window
+        // for the panadapter analyzer -- AnanPanAnalyzer::Settings. The size
+        // is build-time only (a new one is a rebuild); the window is also kept
+        // current by setPanWindow().
+        int panFftSize = 0;
+        int panWindow = AnanPanAnalyzer::kDefaultWindow;
         WdspChannel::Mode mode = WdspChannel::Mode::Usb;
         double filterLowHz = 150.0;
         double filterHighHz = 3000.0;
@@ -208,6 +214,8 @@ public:
     // AnanPanAnalyzer::kMaxPoints; below 2 is ignored. See
     // AnanPanAnalyzer::setNumPoints().
     Q_INVOKABLE void setPanPoints(int points);
+    // brick3-angelia: the analyzer's window; see AnanPanAnalyzer::setWindow().
+    Q_INVOKABLE void setPanWindow(int window);
 
     // Installs the per-bin dB correction for ONE DDC0 rate (AnanDroopCorrection.h).
     // Ignored if `table` is not kDroopCorrectionFftSize long or the rate is not a

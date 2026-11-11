@@ -1577,6 +1577,7 @@ set(GUI_SOURCES
     src/gui/ShackSwitchApplet.cpp
     src/gui/GreenHeronApplet.cpp
     src/gui/TitleBar.cpp
+    src/gui/TitleFrequencyReadout.cpp
     src/gui/RoundedMenu.cpp
     src/gui/StatusIndicator.cpp
     src/gui/BrandMark.cpp

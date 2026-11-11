@@ -752,6 +752,12 @@ static void populateFamilyParams(RadioConnectRequest& req, const QString& family
                           anan::AnanSettings::rxAntenna());
         req.params.insert(QStringLiteral("anan.agcThresholdAuto"),
                           anan::AnanSettings::agcThresholdAuto());
+        // brick3-angelia: the panadapter analyzer's FFT size and window, so
+        // the session's first analyzer is already built with them.
+        req.params.insert(QStringLiteral("anan.panFftSize"),
+                          anan::AnanSettings::panFftSize());
+        req.params.insert(QStringLiteral("anan.panWindow"),
+                          anan::AnanSettings::panWindow());
         return;
     }
 

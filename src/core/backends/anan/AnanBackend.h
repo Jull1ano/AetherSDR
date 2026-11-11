@@ -157,6 +157,11 @@ public:
     // fixed rates.
     [[nodiscard]] static int nearestDdc0RateKsps(int requestedKsps) noexcept;
 
+    // brick3-angelia: a requested panadapter FFT size as the analyzer takes
+    // it: 0 (automatic) for anything not positive, else the next power of two
+    // within AnanPanAnalyzer::kSmallestFftSize..kMaxFftSize.
+    [[nodiscard]] static int sanitizedPanFftSize(int requested) noexcept;
+
     // The AGC-T knob (0..100) as WDSP gain in dB: the AGC's maximum gain, or
     // the fixed gain with AGC off. -20..120 dB is the range of deskHPSDR's AGC
     // gain slider and of Thetis's AGC-T, which sets both gains the same way.
@@ -498,6 +503,11 @@ private:
     // brick3-angelia: WDSP's NR2 (EMNR) as the client last asked for it
     // ("anan" "nr2.set"); retained like the blanker. Engaged = on.
     std::optional<WdspChannel::Emnr> m_nr2;
+    // brick3-angelia: the panadapter analyzer's FFT size (0 = automatic) and
+    // window, as AnanSettings holds them: loaded at connect, moved by the
+    // "pan.set" verb. A new size rebuilds the DSP; a window applies live.
+    int m_panFftSize = 0;
+    int m_panWindow = AnanPanAnalyzer::kDefaultWindow;
 
     // The receiver audio stage as last set; emitSliceState() publishes these.
     // Retained across rate changes and reconnects (like the blanker and AGC).

@@ -74,6 +74,15 @@ public:
     static bool agcThresholdAuto();
     static void setAgcThresholdAuto(bool on);
 
+    // brick3-angelia: the panadapter analyzer's FFT size (0 = automatic) and
+    // window (WDSP's analyzer window number, AnanPanAnalyzer::Settings). Read
+    // at connect; AnanBackend's "pan.set" verb writes them when the operator
+    // changes one. Range-checked where they are applied, not here.
+    static int panFftSize();
+    static void setPanFftSize(int size);
+    static int panWindow();
+    static void setPanWindow(int window);
+
     // The DDC0 rates a session may start at, for a UI offering the choice.
     //
     // Here rather than read from the protocol header directly, because a setup

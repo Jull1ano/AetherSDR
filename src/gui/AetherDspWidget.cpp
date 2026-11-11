@@ -722,6 +722,15 @@ void AetherDspWidget::setNr2Available(bool available, const QString& tooltip)
     }
 }
 
+AetherDspWidget::MethodState AetherDspWidget::methodState(const QString& name) const
+{
+    for (const QPushButton* btn : m_dspBtns) {
+        if (btn && btn->text() == name)
+            return {btn->isEnabled(), btn->isEnabled() ? QString() : btn->toolTip()};
+    }
+    return {};
+}
+
 void AetherDspWidget::selectTab(const QString& name)
 {
     if (!m_dspStack) return;

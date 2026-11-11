@@ -57,6 +57,17 @@ public:
     // Jump to a named tab (e.g. "MNR", "NR2", "DFNR").
     void selectTab(const QString& name);
 
+    // brick3-angelia: whether a method's selector can be chosen in this build
+    // and on this machine, and the reason it carries when it cannot -- read
+    // from the selector itself, so another surface offering the same seven
+    // methods (the VFO flag's quick row) never restates the build and GPU
+    // rules. An unknown name reports selectable with no reason.
+    struct MethodState {
+        bool selectable{true};
+        QString toolTip;
+    };
+    MethodState methodState(const QString& name) const;
+
     // Tighten padding / margins / fonts for the docked-applet variant.
     // The Settings-menu dialog leaves this off and renders at full size.
     void setCompactMode(bool on);

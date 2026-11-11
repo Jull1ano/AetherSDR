@@ -18,8 +18,7 @@ namespace AetherSDR::anan {
 namespace {
 
 // WDSP analyzer constants (see aether_wdsp.h's analyzer block).
-constexpr int kWindowKaiser = 5;
-constexpr double kKaiserPiAlpha = 14.0;
+constexpr double kKaiserPiAlpha = 14.0;   // read by the Kaiser window only
 constexpr int kDetectorAverage = 2;
 constexpr int kAverageNone = 0;
 constexpr int kAverageLinearRecursive = 1;
@@ -43,7 +42,12 @@ AnanPanAnalyzer::Derived AnanPanAnalyzer::derive(const Settings& s) noexcept
     const int fps = std::max(1, s.framesPerSecond);
     const double rate = static_cast<double>(std::max(1, s.sampleRateHz));
 
-    d.fftSize = std::max(kMinFftSize, nextPowerOfTwo(std::max(1, s.numPoints)));
+    // The operator's size when one is set, else the automatic one. A size
+    // below the point count is fine: the analyzer interpolates points between
+    // bins (SetAnalyzer: n_pix "may be either <= or > number of bins").
+    d.fftSize = s.fftSize > 0
+        ? std::max(kSmallestFftSize, nextPowerOfTwo(s.fftSize))
+        : std::max(kMinFftSize, nextPowerOfTwo(std::max(1, s.numPoints)));
 
     // One full FFT per display frame: each FFT advances by rate / fps fresh
     // samples and re-uses the rest of its window from the previous one. At a
@@ -104,7 +108,9 @@ std::unique_ptr<AnanPanAnalyzer> AnanPanAnalyzer::create(int disp, const Setting
         return nullptr;
     }
 
-    std::unique_ptr<AnanPanAnalyzer> a(new AnanPanAnalyzer(disp, settings));
+    Settings checked = settings;
+    checked.window = std::clamp(checked.window, 0, kWindowCount - 1);
+    std::unique_ptr<AnanPanAnalyzer> a(new AnanPanAnalyzer(disp, checked));
     a->applySettings();
     return a;
 }
@@ -126,7 +132,7 @@ AnanPanAnalyzer::~AnanPanAnalyzer()
     const Derived d = derive(m_settings);
     int highSideLo = 0;
     auto lock = WdspChannel::fftwSetupLock();   // DestroyAnalyzer destroys FFTW plans
-    SetAnalyzer(m_disp, 1, 1, 1, &highSideLo, d.fftSize, kBlockSize, kWindowKaiser,
+    SetAnalyzer(m_disp, 1, 1, 1, &highSideLo, d.fftSize, kBlockSize, m_settings.window,
                 kKaiserPiAlpha, d.overlap, 0, 0.0, 0.0, m_settings.numPoints, 1, 0, 0.0,
                 0.0, d.maxWriteahead);
     DestroyAnalyzer(m_disp);
@@ -148,7 +154,7 @@ void AnanPanAnalyzer::applySettings()
                     &highSideLo,
                     d.fftSize,
                     kBlockSize,
-                    kWindowKaiser,
+                    m_settings.window,
                     kKaiserPiAlpha,
                     d.overlap,
                     0,                  // no per-sub-span clip
@@ -177,7 +183,8 @@ void AnanPanAnalyzer::applyAveraging()
     // session what the analyzer is actually doing.
     qCInfo(lcAnanPan).nospace()
         << "analyzer slot " << m_disp << ": " << m_settings.sampleRateHz << " Hz, "
-        << m_settings.numPoints << " points, FFT " << d.fftSize << ", overlap "
+        << m_settings.numPoints << " points, FFT " << d.fftSize << ", window "
+        << m_settings.window << ", overlap "
         << d.overlap << ", " << m_settings.framesPerSecond << " fps, average "
         << m_settings.averageTimeMs << " ms "
         << (m_settings.averageTimeMs <= 0 ? "(none)"
@@ -230,6 +237,19 @@ void AnanPanAnalyzer::setLogAverage(bool on)
     if (m_settings.averageTimeMs > 0)
         m_seeded = false;
     applyAveraging();
+}
+
+void AnanPanAnalyzer::setWindow(int window)
+{
+    window = std::clamp(window, 0, kWindowCount - 1);
+    if (window == m_settings.window)
+        return;
+    m_settings.window = window;
+    // SetAnalyzer() resets the input ring, as in setFramesPerSecond(). The
+    // running average is kept: a window moves the levels by a fraction of a
+    // dB, which the average absorbs within its own time constant.
+    m_stagedCount = 0;
+    applySettings();
 }
 
 void AnanPanAnalyzer::setFramesPerSecond(int fps)

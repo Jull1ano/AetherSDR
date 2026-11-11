@@ -29,6 +29,9 @@ constexpr const char* kFieldBandFilters       = "bandFilters";
 constexpr const char* kFieldSpeakerAmpMuted   = "speakerAmpMuted";
 constexpr const char* kFieldRxAntenna         = "rxAntenna";   // brick3-angelia
 constexpr const char* kFieldAgcThresholdAuto  = "agcThresholdAuto";   // brick3-angelia
+constexpr const char* kFieldPanFftSize        = "panFftSize";         // brick3-angelia
+constexpr const char* kFieldPanWindow         = "panWindow";          // brick3-angelia
+constexpr int kDefaultPanWindow = 5;   // Kaiser: AnanPanAnalyzer::kDefaultWindow
 
 }  // namespace
 
@@ -190,6 +193,32 @@ void AnanSettings::setAgcThresholdAuto(bool on)
 {
     QJsonObject obj = readObj();
     obj[QLatin1String(kFieldAgcThresholdAuto)] = on;
+    writeObj(obj);
+}
+
+int AnanSettings::panFftSize()
+{
+    const int v = readObj().value(QLatin1String(kFieldPanFftSize)).toInt(0);
+    return v > 0 ? v : 0;
+}
+
+void AnanSettings::setPanFftSize(int size)
+{
+    QJsonObject obj = readObj();
+    obj[QLatin1String(kFieldPanFftSize)] = size > 0 ? size : 0;
+    writeObj(obj);
+}
+
+int AnanSettings::panWindow()
+{
+    const int v = readObj().value(QLatin1String(kFieldPanWindow)).toInt(kDefaultPanWindow);
+    return v >= 0 ? v : kDefaultPanWindow;
+}
+
+void AnanSettings::setPanWindow(int window)
+{
+    QJsonObject obj = readObj();
+    obj[QLatin1String(kFieldPanWindow)] = window >= 0 ? window : kDefaultPanWindow;
     writeObj(obj);
 }
 

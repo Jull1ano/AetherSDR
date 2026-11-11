@@ -33,7 +33,23 @@ public:
         int framesPerSecond = 25;      // display frame rate
         int averageTimeMs = 0;         // time average, ms; 0 = none
         bool logAverage = true;        // log-recursive (true) or linear-recursive
+        // brick3-angelia: the operator's FFT size. 0 = automatic (kMinFftSize,
+        // or the point count when that is larger); otherwise rounded up to a
+        // power of two in kSmallestFftSize..kMaxFftSize. A smaller FFT follows
+        // signals faster and looks grainier; a larger one averages more bins
+        // into each point, so the trace is calmer and slower. Read by create()
+        // only: a new size re-plans FFTW_PATIENT, which no setter may do on
+        // the feeding thread -- the owner rebuilds instead.
+        int fftSize = 0;
+        // brick3-angelia: WDSP's analyzer window, 0..kWindowCount-1:
+        // 0 rectangular, 1 Blackman-Harris (4-term), 2 Hann, 3 flat-top,
+        // 4 Hamming, 5 Kaiser (PiAlpha 14, deskHPSDR's and the default),
+        // 6 Blackman-Harris (7-term).
+        int window = 5;
     };
+
+    static constexpr int kDefaultWindow = 5;
+    static constexpr int kWindowCount = 7;
 
     // Complex samples handed to the analyzer per Spectrum0() call. A power of
     // two, so it divides the analyzer's input ring (2 * kMaxFftSize).
@@ -45,6 +61,8 @@ public:
     // rate-change rebuild.
     static constexpr int kMaxFftSize = 65536;
     static constexpr int kMinFftSize = 16384;
+    // The smallest FFT the operator may pick (Settings::fftSize).
+    static constexpr int kSmallestFftSize = 4096;
     // Most output points the analyzer can return (WDSP's dMAX_PIXELS).
     static constexpr int kMaxPoints = 16384;
 
@@ -81,6 +99,12 @@ public:
     // averaging. Cheap; re-seeds, since entering either mode resets WDSP's
     // history.
     void setLogAverage(bool on);
+
+    // The window (Settings::window), clamped to its range. The FFT size is
+    // unchanged, so nothing is re-planned: WDSP only recomputes the window
+    // coefficients. Resets the input ring, as setFramesPerSecond() does.
+    void setWindow(int window);
+    [[nodiscard]] int window() const noexcept { return m_settings.window; }
 
     // Stage raw wire IQ and hand the analyzer every whole kBlockSize block.
     // A partial block is carried to the next call.

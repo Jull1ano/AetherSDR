@@ -6,6 +6,9 @@
 // MainWindow::selectBand() receives; broadcast bands use "BC<metres>" so they
 // never collide with an amateur band of the same metre number (60 m, 15 m).
 
+#include "models/BandSettings.h"
+#include "models/BroadcastBandPolicy.h"
+
 #include <QString>
 
 #include <array>
@@ -62,6 +65,42 @@ inline constexpr std::array<Entry, 2> kBarUtility{{
     {"WWV", "WWV", 10.000, "AM"},
     {"GEN", "GEN", 0.500, "AM"},
 }};
+
+// CB with its extended channels: between the 11 m broadcast band and 10 m.
+inline constexpr double kCbLowMhz = 26.5;
+inline constexpr double kCbHighMhz = 28.0;
+
+inline bool isCbMhz(double mhz) noexcept
+{
+    return mhz >= kCbLowMhz && mhz < kCbHighMhz;
+}
+
+// The bandName of the button whose band holds `mhz` -- the one the band bar
+// keeps lit. Broadcast bands first: in ITU Region 1 7.2-7.3 MHz is 41 m and
+// 3.9-4.0 MHz is 75 m, although the amateur table (US edges) also claims
+// them. Then the amateur band, then CB; anything else is GEN. Empty for no
+// frequency. MainWindow::bandZoomKeyForMhz() keeps the same order.
+inline QString buttonBandForMhz(double mhz)
+{
+    if (!(mhz > 0.0))
+        return {};
+    const double hz = mhz * 1e6;
+    for (const broadcast::Band& b : broadcast::kBands) {
+        if (hz >= b.lowHz && hz < b.highHz) {
+            if (b.kind == broadcast::Kind::LongMediumWave)
+                return QStringLiteral("LMW");
+            QString metres = QString::fromLatin1(b.name);   // "41m"
+            metres.chop(1);
+            return QStringLiteral("BC") + metres;
+        }
+    }
+    const QString amateur = BandSettings::bandForFrequency(mhz);
+    if (amateur != QLatin1String("GEN"))
+        return amateur;
+    if (isCbMhz(mhz))
+        return QStringLiteral("CB");
+    return QStringLiteral("GEN");
+}
 
 // Bands with no Flex band-stack slot: every radio tunes them directly.
 inline bool isTuneOnlyBand(const QString& bandName)

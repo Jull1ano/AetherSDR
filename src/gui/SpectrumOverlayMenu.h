@@ -167,6 +167,25 @@ public:
     // the SW estimate is untouched and stays available on every family.
     void setRadioSideAutoBlackAvailable(bool available);
     void setFftAverageDescriptions(const QString& average, const QString& weighted);
+
+    // brick3-angelia: display-engine controls for a radio whose panadapter
+    // this host computes (RadioCapabilities::hostPanAnalyzer, and a span that
+    // follows the sample rate). Each row is hidden while its list is empty.
+    //
+    // Rate: the receiver's sample rates in Hz, and the one running. On such
+    // a radio the rate IS the span, so this is zoom as a list.
+    void setSampleRateChoices(const QVector<int>& ratesHz, int currentHz);
+    void setCurrentSampleRateHz(int hz);
+    // FFT size (0 = automatic, always offered first) and window (sent as its
+    // index in `windows`), with the values in force.
+    void setHostAnalyzerChoices(const QVector<int>& fftSizes, int fftSize,
+                                const QStringList& windows, int window);
+    // One FFT AVG step as a time, so the readout shows milliseconds; 0 keeps
+    // the bare number.
+    void setFftAverageStepMs(int ms);
+    // The weighted-average toggle's label on this radio; empty restores
+    // "Wt Avg".
+    void setWeightedAverageLabel(const QString& label);
     void syncWnbState(bool on, int level, bool updating);
     void setRfGain(int gain);
     void setRfGainRange(int low, int high, int step,
@@ -245,6 +264,10 @@ signals:
     // *RightClicked) were removed with the overlay's DSP panel.
     // Display sub-panel signals
     void fftAverageChanged(int frames);
+    // brick3-angelia: the Rate / FFT Size / Window rows (see the setters).
+    void sampleRateRequested(int hz);
+    void hostFftSizeChanged(int size);      // 0 = automatic
+    void hostFftWindowChanged(int window);  // index into the offered windows
     void fftFpsChanged(int fps);
     void fftWeightedAverageChanged(bool on);
     void fftFillAlphaChanged(float alpha);
@@ -484,6 +507,16 @@ private:
     bool         m_displayPanelVisible{false};
     QSlider*     m_avgSlider{nullptr};
     QLabel*      m_avgLabel{nullptr};
+    // brick3-angelia: FFT AVG readout in ms, and the host-analyzer rows.
+    int          m_avgStepMs{0};
+    QString averageText(int steps) const;
+    void refreshFftSizeTexts();
+    QLabel*      m_sampleRateLbl{nullptr};
+    QComboBox*   m_sampleRateCmb{nullptr};
+    QLabel*      m_fftSizeLbl{nullptr};
+    QComboBox*   m_fftSizeCmb{nullptr};
+    QLabel*      m_fftWindowLbl{nullptr};
+    QComboBox*   m_fftWindowCmb{nullptr};
     QSlider*     m_fpsSlider{nullptr};
     QLabel*      m_fpsLabel{nullptr};
     QSlider*     m_smoothSlider{nullptr};
