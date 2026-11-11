@@ -1408,6 +1408,20 @@ void MainWindow::buildMenuBar()
         AppSettings::instance().save();
     });
 
+    // brick3-angelia: the one-line band bar above each spectrum (BandBar).
+    auto* bandBarAct = viewMenu->addAction("Band Bar");
+    bandBarAct->setCheckable(true);
+    bandBarAct->setToolTip("A line of band buttons above the spectrum: amateur "
+                           "bands, HF broadcast bands, WWV and GEN.");
+    bandBarAct->setChecked(
+        AppSettings::instance().value("BandBarVisible", "True").toString() == "True");
+    connect(bandBarAct, &QAction::toggled, this, [this](bool on) {
+        for (auto* a : m_panStack->allApplets())
+            a->setBandBarVisible(on);
+        AppSettings::instance().setValue("BandBarVisible", on ? "True" : "False");
+        AppSettings::instance().save();
+    });
+
     auto* panFollowVfoAct = viewMenu->addAction("Pan Follows VFO");
     panFollowVfoAct->setCheckable(true);
     panFollowVfoAct->setChecked(

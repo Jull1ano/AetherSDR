@@ -97,6 +97,7 @@ See [Profile Management](./profile-management.md).
 | **VFO Marker Size ▸** | Default VFO marker: Off, 1 px or 3 px (default 3 px). See [VFO Widget](./vfo-widget.md). |
 | **VFO Filter Edge ▸** | Default filter-edge lines: Show (default) or Hide. |
 | **Single-Click to Tune** | Tune with one click instead of a double-click. Off by default. |
+| **Band Bar** | A line of band buttons above the spectrum: the amateur bands low to high (with MW and CB), the HF broadcast bands 120 m to 11 m, WWV and GEN. On by default. |
 | **Broadcast Bands: Auto AM & Step** | ANAN and HL2: tuning into a broadcast band switches to AM with a 9 kHz step on long and medium wave and 5 kHz on the shortwave broadcast bands (120 m to 11 m, ITU Region 1 edges); tuning out restores the previous mode. The last step is remembered per band type and per mode. On by default. |
 | **Pan Follows VFO** | Keep the active slice in view while tuning. On by default. |
 | **UI Scale ▸** | 75 % to 200 %, plus Zoom In (Ctrl+=), Zoom Out (Ctrl+-) and Reset (100 %) (Ctrl+0). Takes effect after a restart. |

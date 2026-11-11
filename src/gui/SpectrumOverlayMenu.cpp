@@ -1,4 +1,5 @@
 #include "SpectrumOverlayMenu.h"
+#include "BandButtonCatalog.h"
 #include "FrontEndOverloadIndicator.h"
 #include "core/TxKeyingMarker.h"
 #include "AntennaChoiceGate.h"
@@ -310,6 +311,16 @@ static const QString kBandBtnStyle =
     "QPushButton:checked { background: {{color.background.2}}; "
     "color: {{color.text.primary}}; border: 2px solid {{color.text.primary}}; }";
 
+// brick3-angelia: broadcast band buttons in amber, as on the band bar.
+static const QString kBroadcastBtnStyle =
+    "QPushButton { background: rgba(30, 40, 55, 220); "
+    "border: 1px solid #504030; border-radius: 3px; "
+    "color: #ffcc66; font-size: 11px; font-weight: bold; }"
+    "QPushButton:hover { background: rgba(160, 110, 0, 180); "
+    "border: 1px solid #e0a000; }"
+    "QPushButton:checked { background: {{color.background.2}}; "
+    "color: {{color.text.primary}}; border: 2px solid {{color.text.primary}}; }";
+
 static const QString kXvtrBtnStyle =
     "QPushButton { background: rgba(30, 40, 55, 220); "
     "border: 1px solid #304050; border-radius: 3px; "
@@ -346,7 +357,9 @@ static constexpr BandGridEntry BAND_GRID[] = {
     {"160",  "160m",  1.900,  "LSB"},   // 0
     {"80",   "80m",   3.800,  "LSB"},   // 1
     {"60",   "60m",   5.357,  "USB"},   // 2
-    {"40",   "40m",   7.200,  "LSB"},   // 3
+    // 7.150, not 7.200: 7.200 MHz opens the 41 m broadcast band in Region 1
+    // (BroadcastBandPolicy), which would take the broadcast step (brick3-angelia).
+    {"40",   "40m",   7.150,  "LSB"},   // 3
     {"30",   "30m",  10.125,  "DIGU"},  // 4
     {"20",   "20m",  14.225,  "USB"},   // 5
     {"17",   "17m",  18.130,  "USB"},   // 6
@@ -366,7 +379,7 @@ static constexpr BandGridEntry BAND_GRID[] = {
     {"2",    "2m",  144.200,  "USB"},   // 17 — FLEX-6700
     // brick3-angelia: broadcast and CB listening, tuned directly (no band
     // stack slot). 999 kHz sits on the 9 kHz MW grid; 27.185 MHz is CB ch 19.
-    {"L/MW", "LMW",   0.999,  "AM"},    // 18
+    {"MW",   "LMW",   0.999,  "AM"},    // 18 -- "L/MW" did not fit the button
     {"CB",   "CB",   27.185,  "AM"},    // 19
 };
 
@@ -566,6 +579,30 @@ void SpectrumOverlayMenu::setMemories(const QMap<int, MemoryEntry>& memories, bo
 
 // ── Band sub-panel ────────────────────────────────────────────────────────────
 
+int SpectrumOverlayMenu::addBroadcastBandRows(QGridLayout* grid, int firstRow)
+{
+    const auto& bands = bandbuttons::kBroadcast;
+    for (int i = 0; i < static_cast<int>(bands.size()); ++i) {
+        const bandbuttons::Entry& e = bands[static_cast<std::size_t>(i)];
+        auto* btn = new QPushButton(QString::fromLatin1(e.label), m_bandPanel);
+        btn->setFixedSize(BAND_BTN_W, BAND_BTN_H);
+        ThemeManager::instance().applyStyleSheet(btn, kBroadcastBtnStyle);
+        btn->setCheckable(true);
+        btn->setAccessibleName(tr("%1 broadcast band").arg(QString::fromLatin1(e.label)));
+        const QString bandName = QString::fromLatin1(e.bandName);
+        const double freq = e.freqMhz;
+        const QString mode = QString::fromLatin1(e.mode);
+        connect(btn, &QPushButton::clicked, this, [this, bandName, freq, mode]() {
+            hideAllSubPanels();
+            emit bandSelected(bandName, freq, mode);
+        });
+        m_bandBtnFreqs.append({btn, freq});
+        m_bandButtons.append({btn, bandName});
+        grid->addWidget(btn, firstRow + i / 3, i % 3);
+    }
+    return (static_cast<int>(bands.size()) + 2) / 3;
+}
+
 void SpectrumOverlayMenu::buildBandPanel()
 {
     m_bandPanel = new QWidget(parentWidget());
@@ -590,7 +627,11 @@ void SpectrumOverlayMenu::buildBandPanel()
         {11, 12, 15},           // WWV, GEN, XVTR
     };
 
+    // brick3-angelia: the broadcast rows go between the amateur rows (0-4)
+    // and the WWV / GEN / XVTR row, which moves below them.
+    const int broadcastRows = addBroadcastBandRows(grid, 5);
     for (int row = 0; row < 6; ++row) {
+        const int gridRow = row < 5 ? row : 5 + broadcastRows;
         for (int col = 0; col < 3; ++col) {
             int idx = layout[row][col];
             if (idx < 0) continue;
@@ -620,7 +661,7 @@ void SpectrumOverlayMenu::buildBandPanel()
                 m_bandButtons.append({btn, bandName});
             }
 
-            grid->addWidget(btn, row, col);
+            grid->addWidget(btn, gridRow, col);
         }
     }
 
@@ -3720,6 +3761,8 @@ void SpectrumOverlayMenu::setXvtrBands(const QVector<XvtrBand>& bands)
             }
             ++row;
         }
+        // brick3-angelia: the HF broadcast bands after the amateur ones.
+        row += addBroadcastBandRows(grid, row);
 
         // Built-in transverter bands (4m / 2m) — surfaced for radios that
         // report the corresponding capability flag (FLEX-6500 Region 1: 4m;

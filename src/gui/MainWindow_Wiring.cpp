@@ -31,6 +31,9 @@
 #include "OwnedSingleShotTimer.h"
 #include "PanRecenterPolicy.h"
 #include "PanadapterApplet.h"
+#include "BandBar.h"
+#include "BandButtonCatalog.h"
+#include "models/BroadcastBandPolicy.h"
 #include "ReceiveCaptureAction.h"
 #include "PanadapterMessageOverlay.h"
 #include "PanadapterStack.h"
@@ -3712,6 +3715,44 @@ int MainWindow::cloneDisplaySettingsToAllPans(PanadapterApplet* source)
     return cloned;
 }
 
+// brick3-angelia: which band a frequency's zoom belongs to -- the amateur
+// band (BandSettings), else the broadcast band (BroadcastBandPolicy), else GEN.
+QString MainWindow::bandZoomKeyForMhz(double mhz)
+{
+    const QString amateur = BandSettings::bandForFrequency(mhz);
+    if (amateur != QLatin1String("GEN"))
+        return amateur;
+    const double hz = mhz * 1e6;
+    for (const broadcast::Band& b : broadcast::kBands) {
+        if (hz >= b.lowHz && hz < b.highHz)
+            return QStringLiteral("BC-") + QString::fromLatin1(b.name);
+    }
+    return QStringLiteral("GEN");
+}
+
+void MainWindow::rememberBandZoom(const QString& key, double bandwidthMhz)
+{
+    if (key.isEmpty() || !(bandwidthMhz > 0.0))
+        return;
+    auto& settings = AppSettings::instance();
+    QJsonObject zooms = QJsonDocument::fromJson(
+        settings.value(QStringLiteral("BandZoomMhz")).toString().toUtf8()).object();
+    if (qFuzzyCompare(zooms.value(key).toDouble(), bandwidthMhz))
+        return;
+    zooms.insert(key, bandwidthMhz);
+    settings.setValue(QStringLiteral("BandZoomMhz"),
+                      QString::fromUtf8(QJsonDocument(zooms).toJson(QJsonDocument::Compact)));
+    settings.save();
+}
+
+double MainWindow::rememberedBandZoom(const QString& key) const
+{
+    const QJsonObject zooms = QJsonDocument::fromJson(
+        AppSettings::instance().value(QStringLiteral("BandZoomMhz")).toString().toUtf8()).object();
+    const double mhz = zooms.value(key).toDouble(0.0);
+    return std::isfinite(mhz) && mhz > 0.0 && mhz <= 100.0 ? mhz : 0.0;
+}
+
 void MainWindow::selectBand(const QString& panId, const QString& bandName, double freqMhz,
                             const QString& mode, const QString& stackKeyHint)
 {
@@ -3728,8 +3769,7 @@ void MainWindow::selectBand(const QString& panId, const QString& bandName, doubl
     // Radios without a band stack (HL2): the app is authoritative, so tune to
     // the button's freqMhz/mode directly. brick3-angelia: so are L/MW and CB
     // on every radio -- no Flex band-stack slot exists for them.
-    const bool tuneOnlyBand = bandName == QLatin1String("LMW")
-                              || bandName == QLatin1String("CB");
+    const bool tuneOnlyBand = bandbuttons::isTuneOnlyBand(bandName);
     if (!m_radioModel.usesFlexCommandPlane() || tuneOnlyBand) {
         const RadioCapabilities caps = m_radioModel.backendCapabilities();
         // Refuse rather than tune outside a reported receiver range (no range
@@ -3754,6 +3794,15 @@ void MainWindow::selectBand(const QString& panId, const QString& bandName, doubl
             return;
         }
         clearSwrSweepForBandChange(s->sliceId(), panId, bandName);
+        // brick3-angelia: the zoom is remembered per band -- the band being
+        // left keeps the span it has now, the band being opened gets its own.
+        const QString leavingZoomKey = bandZoomKeyForMhz(s->frequency());
+        const QString targetZoomKey = bandZoomKeyForMhz(freqMhz);
+        if (PanadapterModel* pan = m_radioModel.panadapter(panId);
+            pan && pan->bandwidthMhz() > 0.0) {
+            rememberBandZoom(leavingZoomKey, pan->bandwidthMhz());
+        }
+        const double targetZoomMhz = rememberedBandZoom(targetZoomKey);
         m_bandSettings.setCurrentBand(bandName);
         // brick3-angelia: the button's mode is the operator's choice; the
         // broadcast-band policy keeps it and only follows with the step.
@@ -3771,7 +3820,8 @@ void MainWindow::selectBand(const QString& panId, const QString& bandName, doubl
         // keeps the old band's NCO until the tune happens to fall outside
         // the usable passband, so a band change could leave the trace
         // centred a whole band away from the slice that just moved.
-        m_radioModel.requestPanCenter(panId, freqMhz);
+        m_radioModel.requestPanCenter(panId, freqMhz,
+                                      targetZoomMhz > 0.0 ? targetZoomMhz : -1.0);
         qCDebug(lcProtocol).noquote().nospace()
             << "MainWindow: band switch (no radio band stack) band=" << bandName
             << " pan=" << panId
@@ -3838,6 +3888,16 @@ void MainWindow::wirePanadapter(PanadapterApplet* applet)
 {
     auto* sw = applet->spectrumWidget();
     auto* menu = sw->overlayMenu();
+    // brick3-angelia: the one-line band bar routes like the Band menu.
+    // A placeholder pan is wired again when it becomes the first real pan,
+    // so drop any earlier connection first.
+    if (auto* bar = applet->bandBar()) {
+        disconnect(bar, &BandBar::bandSelected, this, nullptr);
+        connect(bar, &BandBar::bandSelected, this,
+                [this, applet](const QString& bandName, double freqMhz, const QString& mode) {
+            selectBand(applet->panId(), bandName, freqMhz, mode);
+        });
+    }
     const quint64 rangeWiringEpoch = sw->advanceDbmRangeWireEpoch();
     if (!sw->capturePlacementAction()) {
         sw->setCapturePlacementAction(new ReceiveCaptureAction(m_radioModel,

@@ -1,6 +1,8 @@
 #include "PanadapterApplet.h"
 #include "PanSliceTitle.h"
 #include "PanadapterHeader.h"
+#include "BandBar.h"
+#include "core/AppSettings.h"
 #include "models/CwRxModel.h"
 #include "RttyDecodeSettings.h"
 #include "RttyDecoderSensitivity.h"
@@ -85,6 +87,14 @@ PanadapterApplet::PanadapterApplet(QWidget* parent)
     m_mainLayout = layout;
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
+
+    // brick3-angelia: one line of band buttons above the spectrum. Created
+    // here, in the body, like every child (the GPU spectrum never reparents).
+    m_bandBar = new BandBar(body);
+    m_bandBar->setVisible(
+        AppSettings::instance().value(QStringLiteral("BandBarVisible"), "True").toString()
+        == QLatin1String("True"));
+    layout->addWidget(m_bandBar);
 
     // ── Spectrum widget (FFT + waterfall) ────────────────────────────────
     // It runs to the top of the pan: the header below lies over its top
@@ -1260,6 +1270,12 @@ void PanadapterApplet::setRttyStats(float markLevel, float /* spaceLevel */, flo
 void PanadapterApplet::clearRttyText()
 {
     m_rttyText->clear();
+}
+
+void PanadapterApplet::setBandBarVisible(bool visible)
+{
+    if (m_bandBar)
+        m_bandBar->setVisible(visible);
 }
 
 } // namespace AetherSDR

@@ -21,6 +21,7 @@ namespace AetherSDR { struct FrontEndOverload; }
 class QDoubleSpinBox;
 class QScrollArea;
 class QHBoxLayout;
+class QGridLayout;
 
 namespace AetherSDR {
 
@@ -345,6 +346,9 @@ private:
     void updateLayout();
     void toggleBandPanel();
     void buildBandPanel();
+    // brick3-angelia: the HF broadcast band buttons (BandButtonCatalog.h),
+    // three per row from firstRow; returns the rows used.
+    int addBroadcastBandRows(QGridLayout* grid, int firstRow);
     void toggleAntPanel();
     void buildAntPanel();
     void toggleDaxPanel();

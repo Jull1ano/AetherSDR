@@ -1465,6 +1465,7 @@ set(GUI_SOURCES
     src/gui/ProfileImportExportDialog.cpp
     src/gui/TxBandDialog.cpp
     src/gui/PanadapterApplet.cpp
+    src/gui/BandBar.cpp
     src/gui/MiniPanScope.cpp
     src/gui/MiniPanApplet.cpp
     src/gui/RangeSlider.cpp

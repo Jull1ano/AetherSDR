@@ -1,0 +1,73 @@
+#pragma once
+
+// brick3-angelia: the band buttons shared by the Band menu
+// (SpectrumOverlayMenu) and the one-line band bar above the spectrum
+// (BandBar), so the two always offer the same targets. bandName is the key
+// MainWindow::selectBand() receives; broadcast bands use "BC<metres>" so they
+// never collide with an amateur band of the same metre number (60 m, 15 m).
+
+#include <QString>
+
+#include <array>
+
+namespace AetherSDR::bandbuttons {
+
+struct Entry {
+    const char* label;
+    const char* bandName;
+    double freqMhz;
+    const char* mode;
+};
+
+// HF broadcast bands, ITU Region 1 edges (models/BroadcastBandPolicy.h),
+// each opened mid-band in AM on the 5 kHz grid.
+inline constexpr std::array<Entry, 14> kBroadcast{{
+    {"120m", "BC120", 2.400, "AM"},
+    {"90m", "BC90", 3.300, "AM"},
+    {"75m", "BC75", 3.955, "AM"},
+    {"60m", "BC60", 4.950, "AM"},
+    {"49m", "BC49", 6.000, "AM"},
+    {"41m", "BC41", 7.350, "AM"},
+    {"31m", "BC31", 9.650, "AM"},
+    {"25m", "BC25", 11.800, "AM"},
+    {"22m", "BC22", 13.700, "AM"},
+    {"19m", "BC19", 15.400, "AM"},
+    {"16m", "BC16", 17.700, "AM"},
+    {"15m", "BC15", 18.950, "AM"},
+    {"13m", "BC13", 21.600, "AM"},
+    {"11m", "BC11", 25.800, "AM"},
+}};
+
+// The one-line bar: amateur bands low to high (CB beside 10 m), then the
+// broadcast bands (kBroadcast), then the utility targets.
+inline constexpr std::array<Entry, 15> kBarAmateur{{
+    {"2200", "2200m", 0.1375, "CW"},
+    {"630", "630m", 0.475, "CW"},
+    {"MW", "LMW", 0.999, "AM"},
+    {"160", "160m", 1.900, "LSB"},
+    {"80", "80m", 3.800, "LSB"},
+    {"60", "60m", 5.357, "USB"},
+    {"40", "40m", 7.150, "LSB"},
+    {"30", "30m", 10.125, "DIGU"},
+    {"20", "20m", 14.225, "USB"},
+    {"17", "17m", 18.130, "USB"},
+    {"15", "15m", 21.300, "USB"},
+    {"12", "12m", 24.950, "USB"},
+    {"10", "10m", 28.400, "USB"},
+    {"CB", "CB", 27.185, "AM"},
+    {"6", "6m", 50.150, "USB"},
+}};
+
+inline constexpr std::array<Entry, 2> kBarUtility{{
+    {"WWV", "WWV", 10.000, "AM"},
+    {"GEN", "GEN", 0.500, "AM"},
+}};
+
+// Bands with no Flex band-stack slot: every radio tunes them directly.
+inline bool isTuneOnlyBand(const QString& bandName)
+{
+    return bandName == QLatin1String("LMW") || bandName == QLatin1String("CB")
+           || bandName.startsWith(QLatin1String("BC"));
+}
+
+}  // namespace AetherSDR::bandbuttons

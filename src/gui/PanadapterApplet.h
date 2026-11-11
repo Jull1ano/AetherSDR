@@ -17,6 +17,7 @@ class QVBoxLayout;
 namespace AetherSDR {
 
 class SpectrumWidget;
+class BandBar;
 #ifdef AETHER_ASR_ENABLED
 class CopyAssistPanel;
 #endif
@@ -37,6 +38,9 @@ public:
     explicit PanadapterApplet(QWidget* parent = nullptr);
 
     SpectrumWidget* spectrumWidget() const { return m_spectrum; }
+    // brick3-angelia: the one-line band bar above the spectrum (BandBar.h).
+    BandBar* bandBar() const { return m_bandBar; }
+    void setBandBarVisible(bool visible);
 
     QString panId() const { return m_panId; }
     void setPanId(const QString& id);
@@ -160,6 +164,7 @@ private:
 
     QString         m_panId;
     SpectrumWidget* m_spectrum{nullptr};
+    BandBar* m_bandBar{nullptr};
     QWidget*        m_titleBar{nullptr};        // header, left: grip and title
     QWidget*        m_headerButtons{nullptr};   // header, right: pop-out, maximize, close
     QLabel*         m_titleLabel{nullptr};

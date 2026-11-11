@@ -534,6 +534,11 @@ private:
     // slice.
     void selectBand(const QString& panId, const QString& bandName, double freqMhz,
                     const QString& mode, const QString& stackKeyHint = QString());
+    // brick3-angelia: the span each band was last left at, for band buttons
+    // on radios without a band stack (AppSettings "BandZoomMhz").
+    static QString bandZoomKeyForMhz(double mhz);
+    void rememberBandZoom(const QString& key, double bandwidthMhz);
+    double rememberedBandZoom(const QString& key) const;
     // Lock / SWR-sweep guards shared by every tune source.  Returns true if the
     // tune must be blocked (and, for a locked active slice, restores the VFO
     // readout).  Lets the edge-pan tune path — which bypasses applyTuneRequest
