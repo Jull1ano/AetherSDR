@@ -66,6 +66,8 @@
 #include "models/RadioModel.h"
 #include "models/SliceModel.h"
 
+#include <QHash>
+#include <QKeySequence>
 #include <QActionGroup>
 #include <QApplication>
 #include <QColor>
@@ -661,10 +663,27 @@ void MainWindow::buildMenuBar()
     });
     auto* configShortcutsAct = settingsMenu->addAction("Configure Shortcuts...");
     configShortcutsAct->setMenuRole(QAction::NoRole);
-    connect(configShortcutsAct, &QAction::triggered, this, [this] {
+    connect(configShortcutsAct, &QAction::triggered, this, [this, kbAct] {
+        // brick3-angelia: a key the operator just assigned should work, so
+        // binding one turns the Keyboard Shortcuts switch on (it is off by
+        // default, and its name matches this dialog's title).
+        QHash<QString, QKeySequence> before;
+        for (const auto& a : m_shortcutManager.actions())
+            before.insert(a.id, a.currentKey);
         ShortcutDialog dlg(&m_shortcutManager, this);
         dlg.exec();
         m_shortcutManager.rebuildShortcuts(this, shortcutGuard);
+        bool assigned = false;
+        for (const auto& a : m_shortcutManager.actions()) {
+            if (!a.currentKey.isEmpty() && before.value(a.id) != a.currentKey) {
+                assigned = true;
+                break;
+            }
+        }
+        if (assigned && !kbAct->isChecked()) {
+            kbAct->setChecked(true);   // toggled() enables and saves
+            statusBar()->showMessage(tr("Keyboard shortcuts turned on"), 4000);
+        }
     });
     settingsMenu->addSeparator();
 
