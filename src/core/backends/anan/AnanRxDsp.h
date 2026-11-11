@@ -233,7 +233,11 @@ public:
     // panViewLow/High). Takes effect at once -- the frame in hand is re-read
     // onto the new view and published -- and the analyzer is re-aimed once
     // the gesture has settled (kViewSettleMs).
-    Q_INVOKABLE void setPanView(double low, double high);
+    // `sampleRateHz` is the rate the fractions were worked out for. A view
+    // for another rate than the running analyzer's belongs to the channel
+    // being built for that rate: it is held and applied at its install, so
+    // the frames still coming at the old rate are not read through it.
+    Q_INVOKABLE void setPanView(double low, double high, int sampleRateHz);
 
     // Installs the per-bin dB correction for ONE DDC0 rate (AnanDroopCorrection.h).
     // Ignored if `table` is not kDroopCorrectionFftSize long or the rate is not a
@@ -430,6 +434,10 @@ private:
     void publishSpectrum();
     bool m_viewDirty = false;
     QElapsedTimer m_viewChangeClock;
+    // A view sent for a rate that is not running yet (setPanView()); the rate
+    // is 0 when none is held.
+    PanWindow m_nextView;
+    int m_nextViewRateHz = 0;
     PanWindow m_frameWindow;        // the part of the band m_bins covers
     bool m_frameValid = false;      // m_bins holds a frame of this analyzer
     std::vector<float> m_viewBins;  // the frame as the view shows it

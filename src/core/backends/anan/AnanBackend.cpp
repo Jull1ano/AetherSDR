@@ -1576,8 +1576,11 @@ void AnanBackend::pushView()
     m_pendingDspConfig.panViewLow = low;
     m_pendingDspConfig.panViewHigh = high;
     if (m_dsp) {
+        // With the rate the fractions are for: during a rate change the
+        // analyzer still running is at the old one (AnanRxDsp::setPanView()).
         QMetaObject::invokeMethod(m_dsp, "setPanView", Qt::QueuedConnection,
-                                  Q_ARG(double, low), Q_ARG(double, high));
+                                  Q_ARG(double, low), Q_ARG(double, high),
+                                  Q_ARG(int, m_pendingParams.rx1RateKsps * 1000));
     }
 }
 

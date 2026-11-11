@@ -184,6 +184,12 @@ void AnanRxDsp::installChannel(RebuildResult result)
     // which processIqBlock() does on every block once m_channel is swapped
     // below.
     m_config.inputSampleRateHz = result.inputSampleRateHz;
+    // brick3-angelia: the view that was sent ahead for this rate, if one was.
+    if (m_nextViewRateHz == m_config.inputSampleRateHz) {
+        m_config.panViewLow = m_nextView.low;
+        m_config.panViewHigh = m_nextView.high;
+    }
+    m_nextViewRateHz = 0;
 
     m_iqBuffer.clear();
     m_exchangeHeadWait.invalidate();   // a fresh channel starts primed
@@ -486,11 +492,20 @@ void AnanRxDsp::retargetAnalyzerIfSettled()
     retargetAnalyzer(*m_analyzer);
 }
 
-void AnanRxDsp::setPanView(double low, double high)
+void AnanRxDsp::setPanView(double low, double high, int sampleRateHz)
 {
     low = std::clamp(low, 0.0, 1.0);
     high = std::clamp(high, 0.0, 1.0);
-    if (!(high > low) || (low == m_config.panViewLow && high == m_config.panViewHigh))
+    if (!(high > low))
+        return;
+    if (sampleRateHz > 0 && sampleRateHz != m_config.inputSampleRateHz) {
+        // For the channel being built at that rate: installChannel() takes it.
+        m_nextView = {low, high};
+        m_nextViewRateHz = sampleRateHz;
+        return;
+    }
+    m_nextViewRateHz = 0;   // a view for the running rate supersedes a held one
+    if (low == m_config.panViewLow && high == m_config.panViewHigh)
         return;
     m_config.panViewLow = low;
     m_config.panViewHigh = high;
