@@ -336,6 +336,16 @@ void applyRxEmnr(int channel, const std::optional<WdspChannel::Emnr>& emnr)
     SetRXAEMNRRun(channel, emnr ? 1 : 0);
 }
 
+// brick3-angelia: WDSP's ANF. The level is the same bounded adaptation
+// strength the analog receive recipe uses; its midpoint is RXA.c's default.
+// Caller holds g_setupMutex.
+void applyRxAutoNotch(int channel, bool on, int level)
+{
+    const double gain = 0.00001 * std::pow(100.0, std::clamp(level, 0, 100) / 100.0);
+    SetRXAANFVals(channel, 64, 16, gain, 0.1);
+    SetRXAANFRun(channel, on ? 1 : 0);
+}
+
 }  // namespace
 
 std::unique_ptr<WdspChannel> WdspChannel::create(const Config& config,
@@ -1558,6 +1568,26 @@ void WdspChannel::closeNoiseBlanker() noexcept
     m_nbOpen = false;
 }
 
+bool WdspChannel::setAutoNotch(bool on, int level) noexcept
+{
+    if (m_config.direction != Direction::Receive || m_config.wbfmReceive
+        || m_config.analogReceiveDsp) {
+        return false;
+    }
+    if (!beginControlOperation()) {
+        return false;
+    }
+    level = std::clamp(level, 0, 100);
+    {
+        const std::scoped_lock setupLock(g_setupMutex);
+        applyRxAutoNotch(m_channelId, on, level);
+    }
+    m_config.autoNotch = on;
+    m_config.autoNotchLevel = level;
+    endControlOperation();
+    return true;
+}
+
 bool WdspChannel::setEmnr(const std::optional<Emnr>& emnr) noexcept
 {
     if (m_config.direction != Direction::Receive || m_config.wbfmReceive) {
@@ -1701,6 +1731,11 @@ bool WdspChannel::open() noexcept
         // brick3-angelia: close() frees the EMNR stage too; re-push it.
         if (!m_config.wbfmReceive) {
             applyRxEmnr(m_channelId, m_config.emnr);
+        }
+        // ...and the automatic notch, unless the analog recipe below owns it.
+        if (!m_config.wbfmReceive && !m_config.analogReceiveDsp
+            && m_config.direction == Direction::Receive) {
+            applyRxAutoNotch(m_channelId, m_config.autoNotch, m_config.autoNotchLevel);
         }
         if (m_config.analogReceiveDsp) {
             const auto& receive = *m_config.analogReceiveDsp;

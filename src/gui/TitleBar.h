@@ -29,6 +29,7 @@ namespace AetherSDR {
 
 class BrandMark;
 class PersistentDialog;
+class TitleDspStrip;
 class TitleFrequencyReadout;
 class WindowCaptionButtons;
 
@@ -141,6 +142,8 @@ public:
     // brick3-angelia: the active receiver's frequency, mid-bar; scroll a digit
     // or click to type. MainWindow feeds it and routes what it emits.
     TitleFrequencyReadout* frequencyReadout() const { return m_freqReadout; }
+    // brick3-angelia: the NB / ANF / noise-reduction switches beside it.
+    TitleDspStrip* dspStrip() const { return m_dspStrip; }
 
     // Introspection for the automation bridge (`titlebar` model): the whole
     // bar — geometry, brand, tabs, audio cluster, window controls.
@@ -222,6 +225,7 @@ private:
     QLabel*      m_otherTxLabel{nullptr};
     QPushButton* m_mfBtn{nullptr};
     TitleFrequencyReadout* m_freqReadout{nullptr};
+    TitleDspStrip* m_dspStrip{nullptr};
     QPushButton* m_pcBtn{nullptr};
     QPushButton* m_speakerBtn{nullptr};
     QPushButton* m_headphoneBtn{nullptr};

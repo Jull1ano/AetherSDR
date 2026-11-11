@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "core/backends/anan/AnanDroopCorrection.h"
+#include "core/backends/anan/AnanPanView.h"
 #include "core/backends/anan/P2Protocol.h"   // kDdc0RatesKsps
 #include "core/backends/anan/AnanPanAnalyzer.h"
 #include "core/dsp/WdspChannel.h"
@@ -77,6 +78,16 @@ public:
         // current by setPanWindow().
         int panFftSize = 0;
         int panWindow = AnanPanAnalyzer::kDefaultWindow;
+        // brick3-angelia: the part of the sampled band on screen, as
+        // fractions of it (AnanPanView.h); 0..1 is all of it. Kept current by
+        // setPanView(). panPoints is the SCREEN's point count: the analyzer's
+        // own follows from it and from the view.
+        double panViewLow = 0.0;
+        double panViewHigh = 1.0;
+        // brick3-angelia: WDSP's automatic notch filter, kept current by
+        // setAutoNotch(). In Config for the same reason as the blanker.
+        bool autoNotch = false;
+        int autoNotchLevel = 50;
         WdspChannel::Mode mode = WdspChannel::Mode::Usb;
         double filterLowHz = 150.0;
         double filterHighHz = 3000.0;
@@ -175,6 +186,8 @@ public:
     // brick3-angelia: WDSP's NR2 (EMNR) on or off with its methods. Deferred
     // like setNoiseBlanker() while a rebuild is in flight.
     void setNr2(bool on, int gainMethod, int npeMethod, bool aeRun);
+    // brick3-angelia: WDSP's automatic notch filter (ANF), level 0..100.
+    void setAutoNotch(bool on, int level);
     struct NoiseBlankerState {
         bool hasChain = false;
         WdspChannel::NoiseBlanker kind = WdspChannel::NoiseBlanker::Off;
@@ -216,6 +229,11 @@ public:
     Q_INVOKABLE void setPanPoints(int points);
     // brick3-angelia: the analyzer's window; see AnanPanAnalyzer::setWindow().
     Q_INVOKABLE void setPanWindow(int window);
+    // brick3-angelia: the part of the sampled band to show (Config::
+    // panViewLow/High). Takes effect at once -- the frame in hand is re-read
+    // onto the new view and published -- and the analyzer is re-aimed once
+    // the gesture has settled (kViewSettleMs).
+    Q_INVOKABLE void setPanView(double low, double high);
 
     // Installs the per-bin dB correction for ONE DDC0 rate (AnanDroopCorrection.h).
     // Ignored if `table` is not kDroopCorrectionFftSize long or the rate is not a
@@ -389,7 +407,32 @@ private:
     std::vector<float> m_left, m_right;             // WdspChannel output scratch
     DcBlocker m_dcBlockL, m_dcBlockR;
     std::vector<float> m_stereo;                    // interleaved audio out
-    std::vector<float> m_bins;                      // spectrum scratch
+    std::vector<float> m_bins;                      // spectrum scratch: the analyzer's frame
+
+    // ---- brick3-angelia: the view inside the sampled band (AnanPanView.h) ----
+    struct PanWindow {
+        double low = 0.0;
+        double high = 1.0;
+    };
+    // How long a view must stand still before the analyzer is re-aimed at it.
+    static constexpr int kViewSettleMs = 120;
+    // The analyzer's window reaches this far past each side of the view, as a
+    // share of the view's width, so a pan of up to that much needs no re-aim.
+    static constexpr double kWindowMargin = 0.5;
+    [[nodiscard]] PanWindow analyzerWindowForView() const noexcept;
+    [[nodiscard]] int analyzerPointsFor(const PanWindow& window) const noexcept;
+    // Aim `analyzer` at the current view and screen width, now.
+    void retargetAnalyzer(AnanPanAnalyzer& analyzer);
+    // processIqBlock()'s check: re-aim once the view has settled, unless the
+    // analyzer already covers it at the right scale.
+    void retargetAnalyzerIfSettled();
+    // m_bins, read onto the view if it is not the view already, and emitted.
+    void publishSpectrum();
+    bool m_viewDirty = false;
+    QElapsedTimer m_viewChangeClock;
+    PanWindow m_frameWindow;        // the part of the band m_bins covers
+    bool m_frameValid = false;      // m_bins holds a frame of this analyzer
+    std::vector<float> m_viewBins;  // the frame as the view shows it
 
     // Live droop-correction tables, keyed by DDC0 rate in ksps -- see
     // setDroopCorrectionTable(). Survives a rate-change rebuild untouched:

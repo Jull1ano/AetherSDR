@@ -143,6 +143,21 @@ void AnanPanAnalyzer::applySettings()
     const Derived d = derive(m_settings);
     m_fftSize = d.fftSize;
     int highSideLo = 0;
+    // The view as whole bins dropped from each end of the span (WDSP's
+    // fscLin/fscHin; whole numbers keep it on its plain, unshifted detector
+    // path). Rounded DOWN, so the frames never cover less than was asked for,
+    // and never so much that fewer than kMinViewBins are left.
+    const double bins = static_cast<double>(d.fftSize);
+    double clipLow = std::floor(std::clamp(m_settings.viewLow, 0.0, 1.0) * bins);
+    double clipHigh = std::floor((1.0 - std::clamp(m_settings.viewHigh, 0.0, 1.0)) * bins);
+    constexpr double kMinViewBins = 8.0;
+    if (clipLow + clipHigh > bins - kMinViewBins) {
+        const double scale = (bins - kMinViewBins) / (clipLow + clipHigh);
+        clipLow = std::floor(clipLow * scale);
+        clipHigh = std::floor(clipHigh * scale);
+    }
+    m_windowLow = clipLow / bins;
+    m_windowHigh = 1.0 - clipHigh / bins;
     {
         // Plans FFTW_PATIENT when the size changes, which it does only on the
         // first call after create().
@@ -158,7 +173,7 @@ void AnanPanAnalyzer::applySettings()
                     kKaiserPiAlpha,
                     d.overlap,
                     0,                  // no per-sub-span clip
-                    0.0, 0.0,           // no whole-span clip -- the crop is the GUI's
+                    clipLow, clipHigh,  // the view: bins dropped from each end
                     m_settings.numPoints,
                     1,                  // one sub-span
                     0,                  // calibration set
@@ -171,7 +186,8 @@ void AnanPanAnalyzer::applySettings()
     // "sample rate" is the point count, so its one-hertz normalisation lands
     // on one point instead.
     SetDisplayNormOneHz(m_disp, 0, 1);
-    SetDisplaySampleRate(m_disp, m_settings.numPoints);
+    SetDisplaySampleRate(m_disp, m_settings.normPoints > 0 ? m_settings.normPoints
+                                                           : m_settings.numPoints);
 }
 
 void AnanPanAnalyzer::applyAveraging()
@@ -183,7 +199,8 @@ void AnanPanAnalyzer::applyAveraging()
     // session what the analyzer is actually doing.
     qCInfo(lcAnanPan).nospace()
         << "analyzer slot " << m_disp << ": " << m_settings.sampleRateHz << " Hz, "
-        << m_settings.numPoints << " points, FFT " << d.fftSize << ", window "
+        << m_settings.numPoints << " points over " << m_windowLow << ".." << m_windowHigh
+        << " of the band, FFT " << d.fftSize << ", window "
         << m_settings.window << ", overlap "
         << d.overlap << ", " << m_settings.framesPerSecond << " fps, average "
         << m_settings.averageTimeMs << " ms "
@@ -237,6 +254,35 @@ void AnanPanAnalyzer::setLogAverage(bool on)
     if (m_settings.averageTimeMs > 0)
         m_seeded = false;
     applyAveraging();
+}
+
+void AnanPanAnalyzer::setViewAndPoints(double viewLow, double viewHigh, int points,
+                                       int normPoints)
+{
+    points = std::clamp(points, 2, kMaxPoints);
+    viewLow = std::clamp(viewLow, 0.0, 1.0);
+    viewHigh = std::clamp(viewHigh, 0.0, 1.0);
+    if (!(viewHigh > viewLow)) {
+        viewLow = 0.0;
+        viewHigh = 1.0;
+    }
+    normPoints = std::max(0, normPoints);
+    if (points == m_settings.numPoints && normPoints == m_settings.normPoints
+        && viewLow == m_settings.viewLow && viewHigh == m_settings.viewHigh) {
+        return;
+    }
+    m_settings.viewLow = viewLow;
+    m_settings.viewHigh = viewHigh;
+    m_settings.normPoints = normPoints;
+    if (points != m_settings.numPoints) {
+        m_settings.numPoints = points;
+        m_scratch.assign(static_cast<std::size_t>(points), 0.0f);
+    }
+    // The averaging history is per point, and the points now stand for other
+    // frequencies: seed from the next frame, as setNumPoints() does.
+    m_seeded = false;
+    m_stagedCount = 0;   // SetAnalyzer() resets the input ring
+    applySettings();
 }
 
 void AnanPanAnalyzer::setWindow(int window)

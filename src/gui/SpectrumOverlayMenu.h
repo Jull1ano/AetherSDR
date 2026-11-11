@@ -172,8 +172,9 @@ public:
     // this host computes (RadioCapabilities::hostPanAnalyzer, and a span that
     // follows the sample rate). Each row is hidden while its list is empty.
     //
-    // Rate: the receiver's sample rates in Hz, and the one running. On such
-    // a radio the rate IS the span, so this is zoom as a list.
+    // Rate: the receiver's sample rates in Hz, and the one running -- how
+    // much spectrum is captured. Not the span: that is zoomed separately,
+    // inside the captured band.
     void setSampleRateChoices(const QVector<int>& ratesHz, int currentHz);
     void setCurrentSampleRateHz(int hz);
     // FFT size (0 = automatic, always offered first) and window (sent as its

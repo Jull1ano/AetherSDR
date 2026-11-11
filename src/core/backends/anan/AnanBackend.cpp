@@ -201,7 +201,7 @@ AnanBackend::AnanBackend(QObject* parent)
     , m_droopCalibrator(AnanDroopCalibrator::Hooks{
         [this] { return m_connected && !m_radioSerial.isEmpty()
                          && capabilities().hostDroopCalibration; },
-        [this](int rateKsps) { setPanBandwidth(kPanId, rateKsps * 1000.0); },
+        [this](int rateKsps) { requestSampleRateKsps(rateKsps); },
         [this](bool bypass) {
             if (m_dsp) {
                 QMetaObject::invokeMethod(m_dsp, "setDroopCorrectionBypassed",
@@ -213,6 +213,10 @@ AnanBackend::AnanBackend(QObject* parent)
         }})
 {
     connect(&m_droopCalibrator, &AnanDroopCalibrator::started, this, [this] {
+        // A sweep measures the whole captured band: undo any zoom for it.
+        m_viewSpanHz = 0.0;
+        pullViewIntoBand();
+        scheduleTuneApply();
         m_droopMessage = QStringLiteral("Sweeping");
         m_droopPercent = 0;
         publishDroopStatus();
@@ -324,9 +328,10 @@ AnanBackend::AnanBackend(QObject* parent)
         // model table (5.4 MHz for an unknown "ANAN-G2") and zooms past the 1.536 MHz
         // ceiling into unsampled black bars. Constant per connection (one DDC), so emit
         // on every linkUp; bounds are capabilities().sampleRatesHz's endpoints.
-        emit panBandwidthLimitsChanged(kPanId,
-                                      kDdc0RatesKsps.front() * 1000.0 / 1.0e6,
-                                      kDdc0RatesKsps.back() * 1000.0 / 1.0e6);
+        // brick3-angelia: the zoom now stops at the rate in force, not at the
+        // widest rate the radio has -- emitPanLimits().
+        emitPanLimits();
+        pushView();
         // The RF Gain slider IS the step attenuator: -31..0 dB in 1 dB steps.
         // Same every linkUp, for the same reason as the limits above.
         emit panRfGainInfoChanged(kPanId, -kMaxStepAttenuationDb, 0, 1);
@@ -526,8 +531,10 @@ RadioCapabilities AnanBackend::capabilities() const
     // (no continuous zoom); panBandwidthLimitsChanged clamps to that list's ends.
     // radioWide is false: one receiver, so no span budget is shared (unlike the
     // HL2's one DDC in front of every receiver) (#5725).
+    // brick3-angelia: no longer. The span is a view inside the sampled band
+    // and zooms continuously; the rate is its own control (hostPanAnalyzer).
     PanSpanModel span;
-    span.followsSampleRate = true;
+    span.followsSampleRate = false;
     span.radioWide = false;
     c.panSpanModel = span;
     c.hasAgcThreshold = true; // Host receiver DSP implements threshold/off gain.
@@ -546,6 +553,8 @@ RadioCapabilities AnanBackend::capabilities() const
     // ("anan" "nr2.set"), as Thetis runs it -- not the client's SpectralNR.
     c.hostNoiseReduction2 = RadioCapabilities::HostNoiseReduction2{
         QStringLiteral("anan"), QStringLiteral("nr2.set")};
+    // brick3-angelia: and so is ANF (requestSliceDsp(), Feature::Anf).
+    c.hostAutoNotch = RadioCapabilities::HostAutoNotch{};
     // brick3-angelia: the operator picks the analyzer's FFT size and window
     // ("anan" "pan.set"). Window names in WDSP's own numbering.
     {
@@ -565,6 +574,9 @@ RadioCapabilities AnanBackend::capabilities() const
                             QStringLiteral("Blackman-Harris 7")};
         analyzer.fftSize = m_panFftSize;
         analyzer.window = m_panWindow;
+        for (const int ksps : kDdc0RatesKsps)
+            analyzer.sampleRatesHz.append(ksps * 1000);
+        analyzer.sampleRateHz = m_pendingParams.rx1RateKsps * 1000;
         analyzer.weightedAverageLabel = QStringLiteral("Log Avg");
         c.hostPanAnalyzer = analyzer;
     }
@@ -611,8 +623,10 @@ RadioCapabilities AnanBackend::capabilities() const
     // Absent: a centre move pulls the slice along at the usable edge, which
     // a declared center control promises never to do.
     c.receivePanCenterControl = std::nullopt;
+    // Any span from the narrowest zoom at the lowest rate to the whole band
+    // at the highest (brick3-angelia: the span is a view, not a rate).
     c.receivePanBandwidthControl = ReceivePanRangeControl{SliceFrequencyControl::Authority::Engine,
-                                                         48'000, 1'536'000};
+                                                         100, 1'536'000};
     c.canTransmit = false;         // P2Client has no PTT capability -- see class comment
     c.txPowerMaxWatts = 0.0;
     c.hostModulates = true;        // client-side WDSP, like the HL2
@@ -712,6 +726,12 @@ void AnanBackend::applyRestoredState(const RestoredRadioState& state)
     // radio A's zoom for radio B.
     m_restoredRateKsps = state.sampleRateHz > 0
         ? nearestDdc0RateKsps(state.sampleRateHz / 1000) : 0;
+    // brick3-angelia: the zoom inside that rate, unconditional like the rest.
+    {
+        const double span = state.extension.value(QStringLiteral("panView")).toObject()
+                                .value(QStringLiteral("spanHz")).toDouble(0.0);
+        m_restoredViewSpanHz = std::isfinite(span) && span > 0.0 ? span : 0.0;
+    }
     // brick3-angelia: the operator's filters, unconditional like the rest.
     m_filterByMode.clear();
     const QJsonObject filters = state.extension.value(QStringLiteral("filters")).toObject();
@@ -760,6 +780,9 @@ RestoredRadioState AnanBackend::currentOperatingState() const
         filters.insert(it.key(), QJsonArray{it.value().first, it.value().second});
     if (!filters.isEmpty())
         state.extension.insert(QStringLiteral("filters"), filters);
+    // brick3-angelia: the zoom inside the rate above; 0 = the whole band.
+    state.extension.insert(QStringLiteral("panView"), QJsonObject{
+        {QStringLiteral("spanHz"), viewSpanHz() < rateHz() ? viewSpanHz() : 0.0}});
     return state;
 }
 
@@ -911,6 +934,9 @@ void AnanBackend::connectRadio(const RadioConnectRequest& request)
     // AnanRxDsp outlives a session and re-applies its last one at install.
     m_ncoHz = m_sliceFreqHz;
     pushShift();
+    // ...and so does the view, at the zoom the last session ended with.
+    m_viewCenterHz = m_sliceFreqHz;
+    m_viewSpanHz = m_restoredViewSpanHz;
 
     m_speakerAudioEnabled = m_pendingParams.speakerAudioEnabled;
     m_pendingDspConfig = AnanRxDsp::Config{};
@@ -925,6 +951,14 @@ void AnanBackend::connectRadio(const RadioConnectRequest& request)
     m_pendingDspConfig.panPoints = m_panPoints;
     m_pendingDspConfig.panFftSize = m_panFftSize;
     m_pendingDspConfig.panWindow = m_panWindow;
+    // The view, so the session's first analyzer is aimed at it. Written
+    // straight into the config: the DSP may still hold the last session's
+    // analyzer, which a queued setPanView() would re-aim for nothing.
+    {
+        const auto [viewLow, viewHigh] = viewFractions();
+        m_pendingDspConfig.panViewLow = viewLow;
+        m_pendingDspConfig.panViewHigh = viewHigh;
+    }
     // The AGC as applyRestoredState() set it for this radio, and the NB request
     // this backend retains across reconnects. emitSliceState() also supplies
     // them if a different radio requires a fresh slice.
@@ -946,6 +980,8 @@ void AnanBackend::applyLiveRxState(AnanRxDsp::Config& config) const
     config.noiseBlankerLevel = m_nbLevel;
     config.noiseBlankerFill = AetherSDR::toWdsp(m_nbFill);
     config.emnr = m_nr2;
+    config.autoNotch = m_anfOn;
+    config.autoNotchLevel = m_anfLevel;
 }
 
 void AnanBackend::beginDspSetup()
@@ -1134,8 +1170,13 @@ void AnanBackend::setSliceFrequency(int sliceId, double hz)
     // The DDC stays put while the slice is inside the usable span -- the
     // spectrum holds still and only the VFO moves, as in Thetis and
     // Hl2Backend::setSliceFrequency(). Leaving it recentres the DDC.
-    if (!(m_ncoHz > 0.0) || std::abs(hz - m_ncoHz) > usableHalfSpanHz())
+    if (!(m_ncoHz > 0.0) || std::abs(hz - m_ncoHz) > usableHalfSpanHz()) {
         m_ncoHz = hz;
+        // The view stays where it is if it still fits in the band, and is
+        // pulled to its edge if not (brick3-angelia). At the whole-band view
+        // that is the old behaviour: it recentres with the DDC.
+        pullViewIntoBand();
+    }
     // Digit readout / slice model: unthrottled. Cheap (no radio round trip,
     // no pan re-layout), and it is what makes a drag gesture feel like it is
     // tracking the mouse at all.
@@ -1235,8 +1276,26 @@ ReceiveDispatch AnanBackend::requestSliceDsp(int sliceId, const SliceDspRequest&
 {
     // #5824 already owns the worker and NB readback. The typed desktop route
     // must consume that implementation, not replace it or invent other DSP.
-    if (sliceId != kSliceId || !request.valid()
-        || request.feature != SliceDspRequest::Feature::Nb) {
+    if (sliceId != kSliceId || !request.valid()) {
+        return ReceiveDispatch::Unsupported;
+    }
+    if (request.feature == SliceDspRequest::Feature::Anf) {
+        // brick3-angelia: WDSP's automatic notch filter, as Thetis's ANF.
+        if (request.field == SliceDspRequest::Field::Level)
+            m_anfLevel = std::clamp(request.level, 0, 100);
+        else
+            m_anfOn = request.enabled;
+        m_pendingDspConfig.autoNotch = m_anfOn;
+        m_pendingDspConfig.autoNotchLevel = m_anfLevel;
+        if (m_dsp) {
+            QMetaObject::invokeMethod(m_dsp, [dsp = m_dsp, on = m_anfOn, level = m_anfLevel] {
+                dsp->setAutoNotch(on, level);
+            }, Qt::QueuedConnection);
+        }
+        emitSliceState();
+        return ReceiveDispatch::Dispatched;
+    }
+    if (request.feature != SliceDspRequest::Feature::Nb) {
         return ReceiveDispatch::Unsupported;
     }
     // Level and Fill ride along so the one verb always gets the whole state.
@@ -1409,18 +1468,123 @@ void AnanBackend::setPanCenter(const QString& panId, double hz, PanCenterIntent 
     // across this call, and a sliceChanged published inside it lets the
     // GUI's slice-follow re-enter requestPanCenter() and trip that fence --
     // every drag and Ctrl+wheel zoom then read as refused (brick3-angelia).
-    if (!std::isfinite(hz) || hz <= 0.0 || hz == m_ncoHz)
+    if (!std::isfinite(hz) || hz <= 0.0 || (hz == viewCenterHz() && !m_viewCommitQueued))
         return;   // nothing to move; also ends a slice-follow echo
-    QMetaObject::invokeMethod(this, [this, hz] {
-        m_ncoHz = hz;
-        const double usable = usableHalfSpanHz();
-        const double kept = std::clamp(m_sliceFreqHz, m_ncoHz - usable, m_ncoHz + usable);
-        if (kept != m_sliceFreqHz) {
-            m_sliceFreqHz = kept;
-            emitSliceState();
+    // brick3-angelia: the centre is the VIEW's -- see commitViewRequest().
+    m_pendingViewCenterHz = hz;
+    queueViewCommit();
+}
+
+void AnanBackend::queueViewCommit()
+{
+    if (m_viewCommitQueued)
+        return;
+    m_viewCommitQueued = true;
+    QMetaObject::invokeMethod(this, [this] { commitViewRequest(); }, Qt::QueuedConnection);
+}
+
+void AnanBackend::commitViewRequest()
+{
+    m_viewCommitQueued = false;
+    const double center = std::exchange(m_pendingViewCenterHz, 0.0);
+    const double span = std::exchange(m_pendingViewSpanHz, -1.0);
+    // The span first: how far the centre may go depends on it. A calibration
+    // sweep measures the whole band and owns the view while it runs.
+    if (span > 0.0 && !m_droopCalibrator.isRunning()) {
+        const double rate = rateHz();
+        m_viewSpanHz = span >= rate ? 0.0 : std::max(span, rate * kMinViewFraction);
+    }
+    if (center > 0.0)
+        m_viewCenterHz = center;
+    // Zoomed in, the view moves inside the captured band and nothing is
+    // retuned; the DDC follows only once the view reaches the band's edge.
+    // At the whole-band view there is no room, and this is the old "a pan
+    // centre moves the DDC".
+    moveDdcToHoldView();
+    keepSliceInUsableBand();
+    // Republishes the pan in every case, so an optimistic GUI span snaps to
+    // what is really shown (a request wider than the band, say).
+    scheduleTuneApply();
+}
+
+double AnanBackend::viewSpanHz() const noexcept
+{
+    const double rate = rateHz();
+    if (!(m_viewSpanHz > 0.0) || m_viewSpanHz >= rate)
+        return rate;
+    return std::max(m_viewSpanHz, rate * kMinViewFraction);
+}
+
+double AnanBackend::viewSlackHz() const noexcept
+{
+    return (0.5 - kPanEdgeCropFraction) * std::max(0.0, rateHz() - viewSpanHz());
+}
+
+void AnanBackend::moveDdcToHoldView()
+{
+    const double center = viewCenterHz();
+    const double slack = viewSlackHz();
+    if (center - m_ncoHz > slack)
+        m_ncoHz = center - slack;
+    else if (m_ncoHz - center > slack)
+        m_ncoHz = center + slack;
+}
+
+void AnanBackend::pullViewIntoBand()
+{
+    const double slack = viewSlackHz();
+    m_viewCenterHz = std::clamp(viewCenterHz(), m_ncoHz - slack, m_ncoHz + slack);
+}
+
+void AnanBackend::keepSliceInUsableBand()
+{
+    const double usable = usableHalfSpanHz();
+    const double kept = std::clamp(m_sliceFreqHz, m_ncoHz - usable, m_ncoHz + usable);
+    if (kept != m_sliceFreqHz) {
+        m_sliceFreqHz = kept;
+        emitSliceState();
+    }
+}
+
+std::pair<double, double> AnanBackend::viewFractions() const noexcept
+{
+    const double rate = rateHz();
+    const double span = viewSpanHz();
+    double low = 0.0;
+    double high = 1.0;
+    if (rate > 0.0 && span < rate) {
+        low = (viewCenterHz() - span / 2.0 - (m_ncoHz - rate / 2.0)) / rate;
+        high = low + span / rate;
+        // Inside the band by construction (viewSlackHz()); this only guards
+        // the arithmetic.
+        if (low < 0.0) {
+            high -= low;
+            low = 0.0;
         }
-        scheduleTuneApply();
-    }, Qt::QueuedConnection);
+        if (high > 1.0) {
+            low = std::max(0.0, low - (high - 1.0));
+            high = 1.0;
+        }
+    }
+    return {low, high};
+}
+
+void AnanBackend::pushView()
+{
+    const auto [low, high] = viewFractions();
+    // In the config too: a build that starts now aims its analyzer here.
+    m_pendingDspConfig.panViewLow = low;
+    m_pendingDspConfig.panViewHigh = high;
+    if (m_dsp) {
+        QMetaObject::invokeMethod(m_dsp, "setPanView", Qt::QueuedConnection,
+                                  Q_ARG(double, low), Q_ARG(double, high));
+    }
+}
+
+void AnanBackend::emitPanLimits()
+{
+    const double rate = rateHz();
+    emit panBandwidthLimitsChanged(kPanId, rate * kMinViewFraction / 1.0e6, rate / 1.0e6);
 }
 
 int AnanBackend::sanitizedPanFftSize(int requested) noexcept
@@ -1459,10 +1623,20 @@ int AnanBackend::nearestDdc0RateKsps(int requestedKsps) noexcept
 void AnanBackend::setPanBandwidth(const QString& panId, double hz)
 {
     Q_UNUSED(panId);   // one pan in this phase
-    if (hz <= 0.0 || !m_connected)
+    if (!std::isfinite(hz) || hz <= 0.0 || !m_connected)
         return;
+    // brick3-angelia: a span is a ZOOM, a view inside the captured band; the
+    // sample rate is requestSampleRateKsps()'s. Applied from the event loop,
+    // for setPanCenter()'s reason, and together with a centre that arrives in
+    // the same request (a zoom about the cursor is one move, not two).
+    m_pendingViewSpanHz = hz;
+    queueViewCommit();
+}
 
-    const int requestedKsps = static_cast<int>(hz / 1000.0 + 0.5);
+void AnanBackend::requestSampleRateKsps(int requestedKsps)
+{
+    if (requestedKsps <= 0 || !m_connected)
+        return;
     const int snappedKsps = nearestDdc0RateKsps(requestedKsps);
 
     if (snappedKsps == m_pendingParams.rx1RateKsps) {
@@ -1503,14 +1677,23 @@ void AnanBackend::beginRateChange(int newRateKsps)
     // keeps zoom from freezing. m_preRateChangeKsps records the running rate so the
     // failure path can roll back: emitPanState() reports from m_pendingDspConfig.
     m_preRateChangeKsps = m_pendingParams.rx1RateKsps;
+    m_preRateChangeViewCenterHz = m_viewCenterHz;
+    m_preRateChangeViewSpanHz = m_viewSpanHz;
     m_pendingParams.rx1RateKsps = newRateKsps;
     m_pendingDspConfig.inputSampleRateHz = newRateKsps * 1000;
     // A narrower span can leave the slice outside it: recentre the DDC on the
     // slice so the audio stays inside the sampled band (brick3-angelia).
+    bool retune = false;
     if (std::abs(m_sliceFreqHz - m_ncoHz) > usableHalfSpanHz()) {
         m_ncoHz = m_sliceFreqHz;
-        scheduleTuneApply();
+        retune = true;   // sent below, once the rebuild is marked
     }
+    // The view keeps its span if the new band still holds it, becomes the
+    // whole band if not, and is pulled inside either way. The audio's place
+    // was settled just above and wins: the view moves, never the slice.
+    if (m_viewSpanHz >= rateHz())
+        m_viewSpanHz = 0.0;
+    pullViewIntoBand();
     // Refresh from CURRENT live operator state, not connectRadio()'s
     // connect-time snapshot: m_pendingDspConfig otherwise only ever had its
     // rate touched here, so a rate change silently reverted mode/filter/AGC
@@ -1548,6 +1731,14 @@ void AnanBackend::beginRateChange(int newRateKsps)
             }, Qt::QueuedConnection);
         }, Qt::QueuedConnection);
     }, Qt::QueuedConnection);
+
+    // brick3-angelia: the view for the NEW rate, queued only now -- behind
+    // beginRebuild() -- so the analyzer still running at the old rate keeps
+    // the view it has and the new one waits for the incoming analyzer's
+    // install. The retune's leading edge sends the view too, hence here.
+    pushView();
+    if (retune)
+        scheduleTuneApply();
 }
 
 void AnanBackend::finishRateChange(quint64 generation, bool ok, const QString& error)
@@ -1566,6 +1757,11 @@ void AnanBackend::finishRateChange(quint64 generation, bool ok, const QString& e
         if (m_preRateChangeKsps > 0) {
             m_pendingParams.rx1RateKsps = m_preRateChangeKsps;
             m_pendingDspConfig.inputSampleRateHz = m_preRateChangeKsps * 1000;
+            // ...and the view with it: the old analyzer is still the one running.
+            m_viewCenterHz = m_preRateChangeViewCenterHz;
+            m_viewSpanHz = m_preRateChangeViewSpanHz;
+            pullViewIntoBand();
+            pushView();
         }
         emit connectionError(error);
         // Safe to clear m_rateChanging immediately here, unlike
@@ -1615,8 +1811,10 @@ void AnanBackend::finishRateChange(quint64 generation, bool ok, const QString& e
         QMetaObject::invokeMethod(m_dsp, "setAudioMuted", Qt::QueuedConnection,
                                   Q_ARG(bool, false));
         m_rateChanging = false;
+        emitPanLimits();   // the zoom's ceiling is the rate that just landed
+        pushView();
         emitPanState();
-        emit operatingStateChanged();   // SpanRate capture: the zoom landed
+        emit operatingStateChanged();   // SpanRate capture: the rate landed
         // A zoom the operator kept turning while this ran: apply the latest
         // request now rather than stranding the display a step behind.
         retryPendingRateChange();
@@ -1844,6 +2042,13 @@ void AnanBackend::invokeExtension(const QString& ns, const QString& verb,
         // Partial, like "frontend.set": only the named fields move. Both are
         // persisted here (AnanSettings), so the next connect starts with them.
         const QVariantMap fields = arg.toMap();
+        if (fields.contains(QStringLiteral("sampleRateHz"))) {
+            // The Rate control: how much spectrum is captured. The zoom is
+            // setPanBandwidth()'s and is left as it is where it still fits.
+            requestSampleRateKsps(
+                static_cast<int>(fields.value(QStringLiteral("sampleRateHz")).toDouble() / 1000.0
+                                 + 0.5));
+        }
         if (fields.contains(QStringLiteral("window"))) {
             const int window = std::clamp(fields.value(QStringLiteral("window")).toInt(),
                                           0, AnanPanAnalyzer::kWindowCount - 1);
@@ -2127,6 +2332,8 @@ void AnanBackend::emitSliceState()
     d.active = true;
     // A different radio replaces the slice model but retains this backend.
     // Publish the retained NB request so that fresh model agrees with the DSP.
+    d.anf = m_anfOn;
+    d.anfLevel = m_anfLevel;
     d.nb = m_nbKind != AetherSDR::NoiseBlankerKind::Off;
     d.nbKind = m_nbKind;
     d.nbLevel = m_nbLevel;
@@ -2176,7 +2383,9 @@ void AnanBackend::emitPanState()
     // the next rate. The decimation roll-off stays visible (and is corrected by the
     // droop tables).
     m_droopCalibrator.setLandedRate(static_cast<int>(sampleRateHz / 1000.0));
-    emit panCenterBandwidthChanged(kPanId, m_ncoHz / 1.0e6, sampleRateHz / 1.0e6);
+    // brick3-angelia: what is SHOWN -- the view's centre and span -- which is
+    // the DDC's centre and the whole rate only while nothing is zoomed.
+    emit panCenterBandwidthChanged(kPanId, viewCenterHz() / 1.0e6, viewSpanHz() / 1.0e6);
 }
 
 void AnanBackend::resetSpeakerResamplers()
@@ -2304,6 +2513,9 @@ void AnanBackend::applyTuneToRadioAndPan()
     // The slice's place inside the span. Sent with the retune so a recentre
     // and its shift reach the radio and the DSP together.
     pushShift();
+    // The view's place inside the band: it changes with a pan or a zoom, and
+    // with a DDC retune under a view that stayed put (brick3-angelia).
+    pushView();
     emitPanState();
     // Tuning capture, once per settled gesture. Outside the connected guard:
     // where the dial ended up is worth keeping even during a teardown.

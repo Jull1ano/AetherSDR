@@ -339,6 +339,10 @@ private:
     // build. finishRateChange() is what actually stops/restarts P2Client,
     // once the new channel already exists.
     void beginRateChange(int newRateKsps);
+    // brick3-angelia: ask for a DDC rate (snapped to one the radio runs). The
+    // Rate control and the calibration sweep come through here; zooming does
+    // not -- see m_viewSpanHz.
+    void requestSampleRateKsps(int requestedKsps);
     // Runs once the background build (started by beginRateChange()) has
     // finished and been installed. Same body as the old beginRateChange()'s
     // second half, just triggered after the rebuild instead of before it --
@@ -381,6 +385,50 @@ private:
         return (m_sliceFreqHz - m_ncoHz) - cwBfoHz();
     }
     void pushShift();
+
+    // ---- brick3-angelia: the view, separate from the sample rate ----
+    // The DDC rate says how much spectrum is captured. What the panadapter
+    // SHOWS is a view inside it -- a centre and a span no wider than the rate
+    // -- and zooming and panning move the view, not the rate (Thetis). The
+    // DDC is retuned only when the view would leave the captured band.
+    [[nodiscard]] double rateHz() const noexcept
+    {
+        return m_pendingParams.rx1RateKsps * 1000.0;
+    }
+    // The span shown: the whole band while m_viewSpanHz is 0 or no narrower
+    // than it, and never below kMinViewFraction of it.
+    [[nodiscard]] double viewSpanHz() const noexcept;
+    [[nodiscard]] double viewCenterHz() const noexcept
+    {
+        return m_viewCenterHz > 0.0 ? m_viewCenterHz : m_ncoHz;
+    }
+    // How far the view's centre may sit from the DDC's. The screen shows the
+    // middle (1 - 2 * kPanEdgeCropFraction) of the reported span, and that
+    // part stays inside the same part of the captured band, so a zoomed view
+    // never shows the band's rolled-off edge. Zero for the whole-band view.
+    [[nodiscard]] double viewSlackHz() const noexcept;
+    // setPanCenter() and setPanBandwidth() only note what was asked; one
+    // queued commitViewRequest() applies both, so a zoom about the cursor --
+    // a centre and a span in one request -- is a single move of the view.
+    void queueViewCommit();
+    void commitViewRequest();
+    double m_pendingViewCenterHz = 0.0;   // 0 = none asked
+    double m_pendingViewSpanHz = -1.0;    // below 0 = none asked
+    bool m_viewCommitQueued = false;
+    // The view was moved: retune the DDC just far enough to keep it inside.
+    void moveDdcToHoldView();
+    // The DDC was moved: pull the view back inside the captured band.
+    void pullViewIntoBand();
+    // After either: a slice left outside the usable band comes along, as it
+    // does when the pan is dragged at the whole-band view.
+    void keepSliceInUsableBand();
+    // The view as fractions of the captured band (AnanPanView.h): 0..1 for
+    // the whole of it.
+    [[nodiscard]] std::pair<double, double> viewFractions() const noexcept;
+    // ...and sent to the DSP.
+    void pushView();
+    // The zoom limits for the rate in force: kMinViewFraction of it to all of it.
+    void emitPanLimits();
 
     QThread* m_ioThread = nullptr;
     P2Client* m_client = nullptr;    // lives on m_ioThread; nullptr parent (moveToThread requires it)
@@ -464,6 +512,21 @@ private:
     // and recentres on the slice beyond it, as Hl2Backend's ncoHz does.
     double m_ncoHz = 0.0;
     static constexpr double kUsablePassbandFraction = 0.8;   // Hl2Backend's
+    // brick3-angelia: the view (see viewSpanHz()). Centre in Hz, 0 until a
+    // session sets it; span in Hz, 0 = the whole captured band.
+    double m_viewCenterHz = 0.0;
+    double m_viewSpanHz = 0.0;
+    // The span the last session ended with (the "panView" state extension).
+    double m_restoredViewSpanHz = 0.0;
+    // The view as it stood before a rate change, for its failure path.
+    double m_preRateChangeViewCenterHz = 0.0;
+    double m_preRateChangeViewSpanHz = 0.0;
+    // The share of a reported span the display drops from EACH side on this
+    // radio: gui/SpectrumPreviewLogic.h's kEdgeTaperFraction, restated here
+    // because nothing below the seam may include a GUI header.
+    static constexpr double kPanEdgeCropFraction = 0.04;
+    // The narrowest view, as a share of the captured band.
+    static constexpr double kMinViewFraction = 1.0 / 512.0;
     // What applyRestoredState() accepted, held for connectRadio(); kept apart
     // from the live m_sliceFreqHz/m_mode. Zero/empty: nothing restored.
     double m_restoredFreqHz = 0.0;
@@ -503,6 +566,10 @@ private:
     // brick3-angelia: WDSP's NR2 (EMNR) as the client last asked for it
     // ("anan" "nr2.set"); retained like the blanker. Engaged = on.
     std::optional<WdspChannel::Emnr> m_nr2;
+    // brick3-angelia: WDSP's automatic notch filter (ANF) as last asked for
+    // through requestSliceDsp(); retained like the blanker.
+    bool m_anfOn = false;
+    int m_anfLevel = 50;
     // brick3-angelia: the panadapter analyzer's FFT size (0 = automatic) and
     // window, as AnanSettings holds them: loaded at connect, moved by the
     // "pan.set" verb. A new size rebuilds the DSP; a window applies live.

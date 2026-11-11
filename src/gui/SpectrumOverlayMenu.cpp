@@ -2026,18 +2026,23 @@ void SpectrumOverlayMenu::buildDisplayPanel()
             ++row;
         };
         makeComboRow(tr("Rate:"), m_sampleRateLbl, m_sampleRateCmb, "displaySampleRateCombo",
-                     tr("The receiver's sample rate, which on this radio is also the "
-                        "width of spectrum shown: zooming picks one of these same "
-                        "rates. A lower rate shows less spectrum in finer detail."));
+                     tr("The receiver's sample rate: how much spectrum is captured "
+                        "around the tuned frequency. It is not the zoom. Zooming "
+                        "and panning move the view inside this band and leave the "
+                        "rate alone; the widest view is the whole band."));
         makeComboRow(tr("FFT Size:"), m_fftSizeLbl, m_fftSizeCmb, "displayFftSizeCombo",
-                     tr("How many samples each spectrum is computed from. Smaller "
-                        "follows signals faster and looks grainier; larger is calmer "
-                        "and finer, and slower to follow. Auto is 16384.\n"
+                     tr("How many samples each spectrum is computed from. Larger "
+                        "gives finer detail when zoomed in and a calmer trace, and "
+                        "is slower to follow; smaller is quicker and coarser. Auto "
+                        "is 16384.\n"
                         "The figure in brackets is the width of one FFT bin at the "
-                        "current rate. A size not used before takes a moment to "
-                        "prepare the first time; the spectrum keeps running "
-                        "meanwhile, and the audio drops out for a quarter of a "
-                        "second when it switches."));
+                        "current rate: zooming in further than that shows no more "
+                        "detail.\n"
+                        "A size not used before has to be prepared once, which can "
+                        "take minutes for the largest ones; the spectrum keeps "
+                        "running meanwhile, mode and filter changes wait for it, "
+                        "and the audio drops out for a quarter of a second when it "
+                        "switches."));
         makeComboRow(tr("Window:"), m_fftWindowLbl, m_fftWindowCmb, "displayFftWindowCombo",
                      tr("The FFT window. Kaiser (the default) and Blackman-Harris 7 "
                         "keep strong signals from smearing into their neighbours; "

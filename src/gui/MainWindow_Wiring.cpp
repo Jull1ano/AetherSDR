@@ -3445,13 +3445,17 @@ void MainWindow::wirePanDisplayStatus(PanadapterApplet* applet,
                 sw->setWfLineDuration(lineDurationMs);
             }
         }));
-    // brick3-angelia: the display panel's Rate row follows the span, however
-    // it changed (zoom, a band button, the row itself).
+    // brick3-angelia: the display panel's Rate row shows the sample rate in
+    // force. On a radio whose analyzer runs in this host the widest span the
+    // pan can zoom out to IS that rate (the span itself is only a view inside
+    // it), and the backend republishes the limits whenever the rate lands.
     if (SpectrumOverlayMenu* rateMenu = sw->overlayMenu()) {
         connections.append(connect(
-            pan, &PanadapterModel::infoChanged,
-            rateMenu, [rateMenu](double, double bandwidthMhz) {
-                rateMenu->setCurrentSampleRateHz(qRound(bandwidthMhz * 1e6));
+            pan, &PanadapterModel::bandwidthLimitsChanged,
+            rateMenu, [this, rateMenu](double, double maxMhz) {
+                const auto analyzer = m_radioModel.backendCapabilities().hostPanAnalyzer;
+                if (analyzer && !analyzer->sampleRatesHz.isEmpty())
+                    rateMenu->setCurrentSampleRateHz(qRound(maxMhz * 1e6));
             }));
     }
     m_panDisplayStatusConnections.insert(panId, connections);
@@ -3471,15 +3475,15 @@ void MainWindow::wirePanDisplayStatus(PanadapterApplet* applet,
         // time, and the spectrum engine's own rows appear for a radio whose
         // span is its sample rate and whose analyzer runs in this host.
         menu->setFftAverageStepMs(averaging ? averaging->msPerAverageStep : 0);
-        const bool rateIsSpan = displayCaps.panSpanModel
-                                && displayCaps.panSpanModel->followsSampleRate;
-        menu->setSampleRateChoices(rateIsSpan ? displayCaps.sampleRatesHz : QVector<int>{},
-                                   qRound(pan->bandwidthMhz() * 1e6));
         if (const auto& analyzer = displayCaps.hostPanAnalyzer) {
+            // The Rate row is the receiver's sample rate -- how much spectrum
+            // is captured -- and nothing else: the span is zoomed separately.
+            menu->setSampleRateChoices(analyzer->sampleRatesHz, analyzer->sampleRateHz);
             menu->setHostAnalyzerChoices(analyzer->fftSizes, analyzer->fftSize,
                                          analyzer->windows, analyzer->window);
             menu->setWeightedAverageLabel(analyzer->weightedAverageLabel);
         } else {
+            menu->setSampleRateChoices({}, 0);
             menu->setHostAnalyzerChoices({}, 0, {}, 0);
             menu->setWeightedAverageLabel({});
         }
@@ -5012,12 +5016,6 @@ void MainWindow::wirePanadapter(PanadapterApplet* applet)
     disconnect(menu, &SpectrumOverlayMenu::sampleRateRequested, this, nullptr);
     disconnect(menu, &SpectrumOverlayMenu::hostFftSizeChanged, this, nullptr);
     disconnect(menu, &SpectrumOverlayMenu::hostFftWindowChanged, this, nullptr);
-    connect(menu, &SpectrumOverlayMenu::sampleRateRequested,
-            this, [this, applet](int hz) {
-        // On these radios the rate is the span: the same request as a zoom.
-        if (hz > 0)
-            m_radioModel.requestPanBandwidth(applet->panId(), hz / 1e6);
-    });
     auto sendHostAnalyzer = [this](const QString& field, int value) {
         const RadioCapabilities caps = m_radioModel.backendCapabilities();
         if (!m_radioModel.isConnected() || !caps.hostPanAnalyzer)
@@ -5031,13 +5029,21 @@ void MainWindow::wirePanadapter(PanadapterApplet* applet)
             this, [this, sendHostAnalyzer](int size) {
         if (sendHostAnalyzer(QStringLiteral("fftSize"), size)) {
             statusBar()->showMessage(
-                tr("Preparing the new FFT size - the spectrum switches when it is ready"),
-                6000);
+                tr("Preparing the new FFT size - the spectrum switches when it is ready "
+                   "(a size never used before can take minutes)"),
+                8000);
         }
     });
     connect(menu, &SpectrumOverlayMenu::hostFftWindowChanged,
             this, [sendHostAnalyzer](int window) {
         sendHostAnalyzer(QStringLiteral("window"), window);
+    });
+    // The receiver's sample rate: how much spectrum is captured. The zoom is
+    // a separate thing (the pan's span) and keeps its width where it fits.
+    connect(menu, &SpectrumOverlayMenu::sampleRateRequested,
+            this, [sendHostAnalyzer](int hz) {
+        if (hz > 0)
+            sendHostAnalyzer(QStringLiteral("sampleRateHz"), hz);
     });
     connect(menu, &SpectrumOverlayMenu::fftAverageChanged,
             this, [this, applet, sw](int v) {
@@ -6563,23 +6569,16 @@ void MainWindow::wireVfoWidget(VfoWidget* w, SliceModel* s)
         // here is read from the AetherRX applet's own selector (build flags,
         // GPU, compressed audio), once for the dimmed look and again at the
         // click, since NR2's answer can change while connected.
-        auto methodState = [this](const QString& method) {
-            auto* applet = m_appletPanel ? m_appletPanel->clientRxDspApplet() : nullptr;
-            auto* selector = applet ? applet->widget() : nullptr;
-            return selector ? selector->methodState(method) : AetherDspWidget::MethodState{};
-        };
         for (const char* method : {"NR2", "NR4", "MNR", "DFNR", "RN2", "BNR", "NNR"}) {
             const QString name = QString::fromLatin1(method);
-            const AetherDspWidget::MethodState state = methodState(name);
+            const auto [available, reason] = clientNrAvailability(name);
             // NR2's availability moves with the audio path; leave it enabled
             // and let the click answer.
             if (name != QLatin1String("NR2"))
-                w->setClientNrAvailable(name, state.selectable, state.toolTip);
+                w->setClientNrAvailable(name, available, reason);
         }
         connect(w, &VfoWidget::clientNrToggled, this,
-                [this, w, methodState](const QString& method, bool on) {
-            if (!m_audio)
-                return;
+                [this, w](const QString& method, bool on) {
             const QPointer<VfoWidget> flag(w);
             // Whatever happens, the row ends up showing what the engine runs:
             // a refused or failed switch must not leave a button lit.
@@ -6587,22 +6586,10 @@ void MainWindow::wireVfoWidget(VfoWidget* w, SliceModel* s)
                 if (flag)
                     flag->setClientNrActive(activeAetherDspMethod());
             };
-            if (on) {
-                const AetherDspWidget::MethodState state = methodState(method);
-                if (!state.selectable) {
-                    statusBar()->showMessage(
-                        state.toolTip.isEmpty()
-                            ? tr("%1 is not available here").arg(method)
-                            : state.toolTip.section(QLatin1Char('\n'), 0, 0),
-                        5000);
-                    resync();
-                    return;
-                }
+            if (!requestClientNr(method, on)) {
+                resync();
+                return;
             }
-            // The operator's own choice: the CW/digital mode policy must not
-            // switch it straight back.
-            m_aetherDspModePolicy.noteUserOverride();
-            setAetherDspMethodEnabled(method, on);
             QTimer::singleShot(400, this, resync);
         });
     }

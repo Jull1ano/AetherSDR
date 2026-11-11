@@ -6,6 +6,8 @@
 
 #include "MainWindow.h"
 
+#include <QStatusBar>
+
 #include "AetherDspWidget.h"
 #include "AppletPanel.h"
 #include "AetherialAudioStrip.h"
@@ -26,6 +28,7 @@
 #include "PhoneApplet.h"
 #include "PhoneCwApplet.h"
 #include "TitleBar.h"
+#include "TitleDspStrip.h"
 #include "ClientChainApplet.h"
 #include "MainWindowHelpers.h"
 #include "core/AetherDspModePolicy.h"
@@ -207,6 +210,78 @@ void MainWindow::setAetherDspMethodEnabled(const QString& method, bool enabled)
             audio->setNnrEnabled(enabled);
         }
     });
+}
+
+// brick3-angelia: what the AetherRX applet's own selector says about a method
+// -- build flags, GPU, compressed audio -- so every other surface offering
+// the same seven agrees with it without restating the rules.
+std::pair<bool, QString> MainWindow::clientNrAvailability(const QString& method) const
+{
+    auto* applet = m_appletPanel ? m_appletPanel->clientRxDspApplet() : nullptr;
+    auto* selector = applet ? applet->widget() : nullptr;
+    if (!selector)
+        return {true, QString()};
+    const AetherDspWidget::MethodState state = selector->methodState(method);
+    return {state.selectable, state.toolTip};
+}
+
+bool MainWindow::requestClientNr(const QString& method, bool on)
+{
+    if (!m_audio || method.isEmpty())
+        return false;
+    if (on) {
+        const auto [available, reason] = clientNrAvailability(method);
+        if (!available) {
+            statusBar()->showMessage(
+                reason.isEmpty() ? tr("%1 is not available here").arg(method)
+                                 : reason.section(QLatin1Char('\n'), 0, 0),
+                5000);
+            return false;
+        }
+    }
+    // The operator's own choice: the CW/digital mode policy must not switch
+    // it straight back.
+    m_aetherDspModePolicy.noteUserOverride();
+    setAetherDspMethodEnabled(method, on);
+    return true;
+}
+
+void MainWindow::refreshTitleDspStrip()
+{
+    auto* strip = m_titleBar ? m_titleBar->dspStrip() : nullptr;
+    if (!strip)
+        return;
+    // The noise reductions: the same answer the AetherRX selector gives. NR2's
+    // moves with the audio path, so it stays enabled and the click answers.
+    for (const QString& method : TitleDspStrip::clientNrIds()) {
+        if (method == QLatin1String("NR2"))
+            continue;
+        const auto [available, reason] = clientNrAvailability(method);
+        strip->setAvailable(method, available, reason);
+    }
+    strip->setClientNrActive(activeAetherDspMethod());
+
+    // NB and ANF belong to the active receiver, and to a radio that has them:
+    // its own DSP (Flex), a declared receive-DSP control, or this host's.
+    const bool connected = m_radioModel.isConnected();
+    const RadioCapabilities caps = m_radioModel.backendCapabilities();
+    using Feature = ReceiveDspControl::Feature;
+    const bool declaresNb = caps.receiveDspControl
+        && caps.receiveDspControl->features.contains(Feature::Nb);
+    const bool declaresAnf = caps.receiveDspControl
+        && caps.receiveDspControl->features.contains(Feature::Anf);
+    SliceModel* slice = activeSlice();
+    const bool nbHere = connected && slice
+        && (caps.hasRadioSideDsp || caps.hasHostNoiseBlanker || declaresNb);
+    const bool anfHere = connected && slice
+        && (caps.hasRadioSideDsp || caps.hostAutoNotch.has_value() || declaresAnf);
+    strip->setAvailable(QStringLiteral("NB"), nbHere,
+                        nbHere ? QString() : tr("No noise blanker on this radio, or no receiver yet."));
+    strip->setAvailable(QStringLiteral("ANF"), anfHere,
+                        anfHere ? QString()
+                                : tr("No automatic notch filter on this radio, or no receiver yet."));
+    strip->setOn(QStringLiteral("NB"), nbHere && slice->nbOn());
+    strip->setOn(QStringLiteral("ANF"), anfHere && slice->anfOn());
 }
 
 void MainWindow::updateAetherDspModePolicy()

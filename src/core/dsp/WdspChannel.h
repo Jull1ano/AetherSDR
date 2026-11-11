@@ -159,6 +159,13 @@ public:
         std::optional<bool> rxBinaural;
         // Receive EMNR (Thetis's NR2); engaged = running. See Emnr.
         std::optional<Emnr> emnr;
+        // brick3-angelia: WDSP's automatic notch filter (ANF, the LMS one
+        // Thetis's ANF button runs), switched live by setAutoNotch(). Level
+        // 0..100 is its adaptation strength, 50 being WDSP's own default.
+        // Separate from analogReceiveDsp, which is a start-time recipe and
+        // sets ANF itself when it is engaged.
+        bool autoNotch = false;
+        int autoNotchLevel = 50;
         double filterLowHz = 150.0;
         double filterHighHz = 3000.0;
         int agcMode = 3;
@@ -453,6 +460,9 @@ public:
     // WBFM channel, or a racing control call); the config keeps the last
     // applied value (brick3-angelia).
     bool setEmnr(const std::optional<Emnr>& emnr) noexcept;
+    // The automatic notch filter on or off, live, with its level 0..100
+    // (Config::autoNotch). False when refused, as setEmnr() (brick3-angelia).
+    bool setAutoNotch(bool on, int level) noexcept;
     // Real-time-safe suspend for backends that clock the channel with silence
     // during TX. The blanker fires on magnitude > threshold * running average, so
     // zeros would decay the average and gate off the start of every RX period.

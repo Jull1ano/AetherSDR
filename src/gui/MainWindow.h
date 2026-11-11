@@ -1705,6 +1705,8 @@ private:
     bool                 m_statusMessageMirrorWired{false};
     QMetaObject::Connection m_miniPanFreqConn;    // active-slice freq → mini-pan centre
     QMetaObject::Connection m_activeFreqDisplayConn;  // → title readout + band bars
+    QMetaObject::Connection m_activeNbConn;           // active-slice NB → title DSP strip
+    QMetaObject::Connection m_activeAnfConn;          // active-slice ANF → title DSP strip
     QMetaObject::Connection m_miniPanFiltConn;    // active-slice filter → mini-pan passband
     bool m_miniPanFeedWanted{false};              // applet visible → consume frames
     QPointer<PanadapterApplet> m_panApplet;  // backward compat alias to active applet
@@ -2109,6 +2111,18 @@ private:
     void updateAetherDspModePolicy();
     QString activeAetherDspMethod() const;
     void setAetherDspMethodEnabled(const QString& method, bool enabled);
+    // brick3-angelia: the client noise reductions as the operator switches
+    // them from the VFO flag's quick row and the title bar's DSP strip.
+    // clientNrAvailability(): whether this build and machine can run the
+    // method, and the reason when not (read from the AetherRX selector).
+    // requestClientNr(): switch it, as the AetherRX selector would; false
+    // (with a status-bar reason) when it cannot run here.
+    std::pair<bool, QString> clientNrAvailability(const QString& method) const;
+    bool requestClientNr(const QString& method, bool on);
+    // The title bar's DSP strip: which switches this radio and build offer,
+    // and what is running now (NB/ANF from the active slice, the noise
+    // reduction from the audio engine).
+    void refreshTitleDspStrip();
     class ClientCompEditor* m_clientCompEditor{nullptr}; // lazy — created on first Edit… click
     class ClientGateEditor* m_clientGateEditor{nullptr}; // lazy — created on first Edit… click
     class ClientTubeEditor* m_clientTubeEditor{nullptr}; // lazy — created on first Edit… click

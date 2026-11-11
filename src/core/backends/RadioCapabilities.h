@@ -855,6 +855,13 @@ struct RadioCapabilities {
         QString verb;
     };
     std::optional<HostNoiseReduction2> hostNoiseReduction2;
+    // The automatic notch filter (ANF) runs in this host's own receive DSP
+    // (WDSP's, as Thetis runs it) and is switched through requestSliceDsp()
+    // with Feature::Anf (brick3-angelia). Engaged = offer the ANF switch; the
+    // record has no fields yet. Absent: ANF is offered only where the radio
+    // runs it (hasRadioSideDsp / receiveDspControl).
+    struct HostAutoNotch {};
+    std::optional<HostAutoNotch> hostAutoNotch;
     // The panadapter is computed by an analyzer in this host whose FFT size
     // and window the operator may choose (ANAN: WDSP's display analyzer, the
     // one Thetis draws with) (brick3-angelia). The client offers `fftSizes`
@@ -871,6 +878,13 @@ struct RadioCapabilities {
         QStringList windows;
         int fftSize = 0;   // in force; 0 = automatic
         int window = 0;    // in force
+        // The receiver sample rates this analyzer can run at, and the one in
+        // force. The rate says how much spectrum is captured; the panadapter's
+        // span is a view inside it and is zoomed separately (as in Thetis).
+        // A change is sent as {sampleRateHz} through the same verb. Empty:
+        // no rate control is offered.
+        QVector<int> sampleRatesHz;
+        int sampleRateHz = 0;
         // What the weighted-average toggle selects on this analyzer, as a
         // short button label. Empty keeps the display's own wording.
         QString weightedAverageLabel;

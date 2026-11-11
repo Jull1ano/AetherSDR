@@ -9730,6 +9730,7 @@ add_executable(hl2_pc_audio_lock_test
     tests/hl2_pc_audio_lock_test.cpp
     src/gui/TitleBar.cpp
     src/gui/TitleFrequencyReadout.cpp
+    src/gui/TitleDspStrip.cpp
     src/gui/FrequencyEntryParser.cpp
     src/core/NetworkDiagnostics.cpp
     src/gui/RoundedMenu.cpp
@@ -9765,6 +9766,7 @@ add_executable(titlebar_headphone_mute_test
     tests/titlebar_headphone_mute_test.cpp
     src/gui/TitleBar.cpp
     src/gui/TitleFrequencyReadout.cpp
+    src/gui/TitleDspStrip.cpp
     src/gui/FrequencyEntryParser.cpp
     src/core/NetworkDiagnostics.cpp
     src/gui/RoundedMenu.cpp
@@ -9802,6 +9804,7 @@ add_executable(mixer_control_availability_test
     tests/mixer_control_availability_test.cpp
     src/gui/TitleBar.cpp
     src/gui/TitleFrequencyReadout.cpp
+    src/gui/TitleDspStrip.cpp
     src/gui/FrequencyEntryParser.cpp
     src/core/NetworkDiagnostics.cpp
     src/gui/RoundedMenu.cpp
@@ -9832,6 +9835,7 @@ add_executable(unified_title_bar_test
     tests/unified_title_bar_test.cpp
     src/gui/TitleBar.cpp
     src/gui/TitleFrequencyReadout.cpp
+    src/gui/TitleDspStrip.cpp
     src/gui/FrequencyEntryParser.cpp
     src/core/NetworkDiagnostics.cpp
     src/gui/RoundedMenu.cpp

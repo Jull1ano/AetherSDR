@@ -46,6 +46,21 @@ public:
         // 4 Hamming, 5 Kaiser (PiAlpha 14, deskHPSDR's and the default),
         // 6 Blackman-Harris (7-term).
         int window = 5;
+        // brick3-angelia: the part of the sampled band the frames cover, as
+        // fractions of it (0 = its lowest frequency, 1 = its highest); 0..1 is
+        // the whole band. WDSP drops the FFT bins outside it and spreads the
+        // rest over numPoints, which is how Thetis zooms: the sample rate stays
+        // put and the display shows a slice of it, at the FFT's own
+        // resolution. Rounded outward to whole bins (windowLow()/windowHigh()
+        // report what is really returned).
+        double viewLow = 0.0;
+        double viewHigh = 1.0;
+        // The point count the levels are normalised to: a level is the power
+        // in one point's bandwidth when the WHOLE band is spread over this
+        // many points. 0 = numPoints. Kept at the screen's width while
+        // numPoints follows the zoom, so the noise floor does not move when
+        // the view is zoomed (Thetis's "1 Hz BW" behaviour).
+        int normPoints = 0;
     };
 
     static constexpr int kDefaultWindow = 5;
@@ -54,12 +69,12 @@ public:
     // Complex samples handed to the analyzer per Spectrum0() call. A power of
     // two, so it divides the analyzer's input ring (2 * kMaxFftSize).
     static constexpr int kBlockSize = 1024;
-    // Largest FFT any setting can ask for, and the analyzer's buffer size.
-    // XCreateAnalyzer sizes its buffers for this and for WDSP's own maxima
-    // (dMAX_PIXOUTS x dMAX_AVERAGE x dMAX_PIXELS window-average frames among
-    // them): about 45 MB per analyzer, and two exist briefly during a
-    // rate-change rebuild.
-    static constexpr int kMaxFftSize = 65536;
+    // Largest FFT any setting can ask for, and the analyzer's buffer size:
+    // Thetis's own largest (brick3-angelia). XCreateAnalyzer sizes its buffers
+    // for this and for WDSP's own maxima (dMAX_PIXOUTS x dMAX_AVERAGE x
+    // dMAX_PIXELS window-average frames among them): about 60 MB per analyzer,
+    // and two exist briefly during a rebuild.
+    static constexpr int kMaxFftSize = 262144;
     static constexpr int kMinFftSize = 16384;
     // The smallest FFT the operator may pick (Settings::fftSize).
     static constexpr int kSmallestFftSize = 4096;
@@ -78,6 +93,17 @@ public:
     [[nodiscard]] int fftSize() const noexcept { return m_fftSize; }
     [[nodiscard]] int numPoints() const noexcept { return m_settings.numPoints; }
     [[nodiscard]] int framesPerSecond() const noexcept { return m_settings.framesPerSecond; }
+    // The part of the sampled band the frames really cover, after rounding to
+    // whole FFT bins (Settings::viewLow/viewHigh are the request).
+    [[nodiscard]] double windowLow() const noexcept { return m_windowLow; }
+    [[nodiscard]] double windowHigh() const noexcept { return m_windowHigh; }
+
+    // The view (Settings::viewLow/viewHigh), the point count and the
+    // normalisation count together, in one reconfiguration. No re-plan -- the
+    // FFT size does not depend on any of them -- but it resets the input
+    // ring, so the next frame needs a full FFT of fresh samples, and the
+    // running average, kept per point, re-seeds from that frame.
+    void setViewAndPoints(double viewLow, double viewHigh, int points, int normPoints);
 
     // The frame-rate-dependent settings -- overlap and the averaging weights --
     // re-applied for a new display rate. The FFT size does not change, so
@@ -137,6 +163,8 @@ private:
     int m_disp;
     Settings m_settings;
     int m_fftSize = 0;
+    double m_windowLow = 0.0;
+    double m_windowHigh = 1.0;
     double m_avBackmult = 0.0;
     void applyAveraging();
     bool m_seeded = false;

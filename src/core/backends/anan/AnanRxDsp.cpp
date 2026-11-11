@@ -107,6 +107,8 @@ AnanRxDsp::RebuildResult AnanRxDsp::buildChannel(const Config& config)
     wc.noiseBlankerLevel = config.noiseBlankerLevel;
     wc.noiseBlankerFill = config.noiseBlankerFill;
     wc.emnr = config.emnr;
+    wc.autoNotch = config.autoNotch;
+    wc.autoNotchLevel = config.autoNotchLevel;
     // Unity, as Hl2RxDsp::kRxPanelGain: WDSP's RXA panel defaults to x4
     // (RXA.c create_panel, gain1 4.0), +12 dB past the AGC's own level. Left
     // at that default, band noise alone peaked at +8 dBFS on a Brick3 and
@@ -243,6 +245,11 @@ void AnanRxDsp::installChannel(RebuildResult result)
         && !result.channel->setEmnr(m_config.emnr)) {
         qCWarning(lcAnanRxDsp) << "NR2 (EMNR) refused by the rebuilt channel";
     }
+    if ((result.channel->config().autoNotch != m_config.autoNotch
+         || result.channel->config().autoNotchLevel != m_config.autoNotchLevel)
+        && !result.channel->setAutoNotch(m_config.autoNotch, m_config.autoNotchLevel)) {
+        qCWarning(lcAnanRxDsp) << "ANF refused by the rebuilt channel";
+    }
     // The hold flag belongs to the channel, so a rebuild loses it. A rate
     // change swaps the channel while audio is muted for its settle window.
     result.channel->setNoiseBlankerHold(m_audioMuted);
@@ -260,7 +267,11 @@ void AnanRxDsp::installChannel(RebuildResult result)
     // The analyzer was built for m_config.spectrumFps as it stood when the
     // build began; bring it up to the operator's current rate.
     result.analyzer->setFramesPerSecond(m_config.spectrumFps);
-    result.analyzer->setNumPoints(m_config.panPoints);
+    // The view and the screen's width as they stand now: the analyzer was
+    // built for the whole band at the width of when the build began.
+    retargetAnalyzer(*result.analyzer);
+    m_viewDirty = false;
+    m_frameValid = false;   // m_bins belongs to the outgoing analyzer
     result.analyzer->setAverageTimeMs(m_config.spectrumAverageMs);
     result.analyzer->setLogAverage(m_config.spectrumLogAverage);
     result.analyzer->setWindow(m_config.panWindow);
@@ -361,6 +372,17 @@ void AnanRxDsp::setNr2(bool on, int gainMethod, int npeMethod, bool aeRun)
     }
 }
 
+void AnanRxDsp::setAutoNotch(bool on, int level)
+{
+    m_config.autoNotch = on;
+    m_config.autoNotchLevel = std::clamp(level, 0, 100);
+    if (!m_channel || m_rebuildInFlight)
+        return;
+    if (!m_channel->setAutoNotch(m_config.autoNotch, m_config.autoNotchLevel)) {
+        qCWarning(lcAnanRxDsp) << "ANF" << (on ? "on" : "off") << "refused by the channel";
+    }
+}
+
 void AnanRxDsp::publishNoiseBlankerState()
 {
     // Read the applied channel even after refusal, never the requested config.
@@ -405,9 +427,97 @@ void AnanRxDsp::setPanPoints(int points)
         return;
     m_config.panPoints = std::min(points, AnanPanAnalyzer::kMaxPoints);
     // Same deferral as setSpectrumRateFps(): the incoming analyzer picks it
-    // up at install.
-    if (m_analyzer && !m_rebuildInFlight)
-        m_analyzer->setNumPoints(m_config.panPoints);
+    // up at install. A running one is re-aimed by the settle check, with the
+    // view: a window being dragged wider reports every width on the way.
+    if (m_analyzer && !m_rebuildInFlight) {
+        m_viewDirty = true;
+        m_viewChangeClock.start();
+    }
+}
+
+AnanRxDsp::PanWindow AnanRxDsp::analyzerWindowForView() const noexcept
+{
+    const double span = m_config.panViewHigh - m_config.panViewLow;
+    if (span >= 1.0 - 1e-6)
+        return {};   // the whole band: nothing to keep in reserve
+    return {std::max(0.0, m_config.panViewLow - kWindowMargin * span),
+            std::min(1.0, m_config.panViewHigh + kWindowMargin * span)};
+}
+
+int AnanRxDsp::analyzerPointsFor(const PanWindow& window) const noexcept
+{
+    // One analyzer point per screen point across the view, so the window,
+    // being wider, takes proportionally more.
+    const double viewSpan = std::max(1e-9, m_config.panViewHigh - m_config.panViewLow);
+    const double ratio = (window.high - window.low) / viewSpan;
+    return std::clamp(static_cast<int>(std::lround(m_config.panPoints * ratio)), 2,
+                      AnanPanAnalyzer::kMaxPoints);
+}
+
+void AnanRxDsp::retargetAnalyzer(AnanPanAnalyzer& analyzer)
+{
+    const PanWindow target = analyzerWindowForView();
+    analyzer.setViewAndPoints(target.low, target.high, analyzerPointsFor(target),
+                              m_config.panPoints);
+}
+
+void AnanRxDsp::retargetAnalyzerIfSettled()
+{
+    if (!m_viewDirty || !m_analyzer || m_rebuildInFlight)
+        return;
+    if (m_viewChangeClock.isValid() && m_viewChangeClock.elapsed() < kViewSettleMs)
+        return;
+    m_viewDirty = false;
+    // Re-aiming empties the analyzer's input, so it is skipped when what it
+    // returns already covers the view at the right scale: a pan inside the
+    // window's reserve costs nothing.
+    const PanWindow target = analyzerWindowForView();
+    const int points = analyzerPointsFor(target);
+    const double haveLow = m_analyzer->windowLow();
+    const double haveHigh = m_analyzer->windowHigh();
+    const double wantSpan = target.high - target.low;
+    const double binFraction = 1.0 / std::max(1, m_analyzer->fftSize());
+    const bool covers = m_config.panViewLow >= haveLow - 1e-9
+                        && m_config.panViewHigh <= haveHigh + 1e-9;
+    const bool sameScale = points == m_analyzer->numPoints()
+        && std::abs((haveHigh - haveLow) - wantSpan) <= 0.02 * wantSpan + 2.0 * binFraction;
+    if (covers && sameScale)
+        return;
+    retargetAnalyzer(*m_analyzer);
+}
+
+void AnanRxDsp::setPanView(double low, double high)
+{
+    low = std::clamp(low, 0.0, 1.0);
+    high = std::clamp(high, 0.0, 1.0);
+    if (!(high > low) || (low == m_config.panViewLow && high == m_config.panViewHigh))
+        return;
+    m_config.panViewLow = low;
+    m_config.panViewHigh = high;
+    // Mid-rebuild the incoming analyzer picks the view up at install.
+    if (!m_analyzer || m_rebuildInFlight)
+        return;
+    m_viewDirty = true;
+    m_viewChangeClock.start();
+    // Show the move now, from the frame in hand: what it covers lands where
+    // it belongs, and the rest follows when the analyzer has been re-aimed.
+    if (m_frameValid)
+        publishSpectrum();
+}
+
+void AnanRxDsp::publishSpectrum()
+{
+    const bool isView = m_bins.size() == static_cast<std::size_t>(m_config.panPoints)
+        && std::abs(m_frameWindow.low - m_config.panViewLow) < 1e-9
+        && std::abs(m_frameWindow.high - m_config.panViewHigh) < 1e-9;
+    if (isView) {
+        emit spectrumReady(m_bins);
+        return;
+    }
+    resamplePanWindow(m_bins, m_frameWindow.low, m_frameWindow.high,
+                      m_config.panViewLow, m_config.panViewHigh,
+                      static_cast<std::size_t>(std::max(2, m_config.panPoints)), m_viewBins);
+    emit spectrumReady(m_viewBins);
 }
 
 void AnanRxDsp::setPanWindow(int window)
@@ -512,6 +622,7 @@ void AnanRxDsp::processIqBlock(const std::vector<std::complex<float>>& iq)
     // -- its FFTs overlap so that one completes per display frame over fresh
     // samples, and none are thrown away. Only TAKING a frame is paced here.
     m_analyzer->feed(iq);
+    retargetAnalyzerIfSettled();
     if (spectrumFrameDue() && m_analyzer->takeFrame(m_bins)) {
         // Real DDC0 roll-off -- the anti-alias FIR's transition band, not CIC
         // sin(x)/x (see AnanDroopCorrection.h). The analyzer's points are
@@ -520,14 +631,26 @@ void AnanRxDsp::processIqBlock(const std::vector<std::complex<float>>& iq)
         // the six valid DDC0 rates.
         const DroopCorrectionTable& droopTable =
             droopTableForRate(m_config.inputSampleRateHz / 1000);
-        applyDroopCorrectionDbResampled(m_bins, droopTable);
-        // Cosmetic edge fade (see applyEdgeFade()). connectRadio() seeds defaults for
-        // all six rates, so on a G2 this always runs; the identity test only suppresses
-        // it during a calibration bypass, when droopTableForRate() returns the
-        // kDroopCorrectionZero object so a sweep measures the radio, not our fade.
-        if (&droopTable != &kDroopCorrectionZero)
-            applyEdgeFade(m_bins);
-        emit spectrumReady(m_bins);
+        // What this frame covers: the whole band, or the window the analyzer
+        // is aimed at when the view is zoomed (brick3-angelia).
+        m_frameWindow = {m_analyzer->windowLow(), m_analyzer->windowHigh()};
+        if (m_frameWindow.low <= 0.0 && m_frameWindow.high >= 1.0) {
+            applyDroopCorrectionDbResampled(m_bins, droopTable);
+            // Cosmetic edge fade (see applyEdgeFade()). connectRadio() seeds defaults for
+            // all six rates, so on a G2 this always runs; the identity test only suppresses
+            // it during a calibration bypass, when droopTableForRate() returns the
+            // kDroopCorrectionZero object so a sweep measures the radio, not our fade.
+            if (&droopTable != &kDroopCorrectionZero)
+                applyEdgeFade(m_bins);
+        } else {
+            // A window: the same correction, read where its points really sit.
+            // No fade: a zoomed view never reaches the band's outer edge
+            // (AnanBackend keeps it inside the part the full view shows).
+            applyDroopCorrectionDbWindowed(m_bins, droopTable, m_frameWindow.low,
+                                           m_frameWindow.high);
+        }
+        m_frameValid = true;
+        publishSpectrum();
         m_lastSpectrumMs = m_spectrumClock.elapsed();
     }
 

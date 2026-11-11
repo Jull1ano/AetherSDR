@@ -10,6 +10,7 @@
 #include "PersistentDialog.h"
 #include "RadioTabBar.h"
 #include "ReleaseTagText.h"
+#include "TitleDspStrip.h"
 #include "TitleFrequencyReadout.h"
 #include "WindowCaptionButtons.h"
 #include "core/NetworkDiagnostics.h"
@@ -293,6 +294,10 @@ TitleBar::TitleBar(QWidget* parent)
     m_hbox->addWidget(makeDragGutter(), 1);
     m_freqReadout = new TitleFrequencyReadout(this);
     m_hbox->addWidget(m_freqReadout, 0, Qt::AlignVCenter);
+    // ...and the receive DSP switches to its right, as Thetis keeps its
+    // NR / NB / ANF grid beside the VFO.
+    m_dspStrip = new TitleDspStrip(this);
+    m_hbox->addWidget(m_dspStrip, 0, Qt::AlignVCenter);
     m_hbox->addWidget(makeDragGutter(), 1);
 
     // ── 5. Audio cluster ────────────────────────────────────────────────────
@@ -1788,6 +1793,7 @@ void TitleBar::setMinimalMode(bool on)
     // has nothing else on screen that would show them a dropped link.
     if (m_radioTabs) m_radioTabs->setCompactMode(on);
     if (m_freqReadout) m_freqReadout->setVisible(!on);
+    if (m_dspStrip) m_dspStrip->setVisible(!on);
     m_pcBtn->setVisible(!on);
     m_speakerBtn->setVisible(!on);
     m_headphoneBtn->setVisible(!on);

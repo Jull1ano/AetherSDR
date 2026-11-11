@@ -33,6 +33,7 @@
 #include "ConnectedStationsDialog.h"
 #include "TitleBar.h"
 #include "TitleFrequencyReadout.h"
+#include "TitleDspStrip.h"
 #include "BandBar.h"
 #include "UpdatesWindow.h"
 #include "core/UpdateController.h"
@@ -5562,6 +5563,44 @@ void MainWindow::buildUI()
             resyncSoon();
         });
     }
+    // brick3-angelia: the DSP switches beside the readout. NB and ANF act on
+    // the active slice, exactly as the VFO flag's buttons do; a noise
+    // reduction goes through the path the AetherRX selector uses.
+    if (auto* strip = m_titleBar->dspStrip()) {
+        connect(strip, &TitleDspStrip::toggled, this, [this](const QString& id, bool on) {
+            if (id == QLatin1String("NB") || id == QLatin1String("ANF")) {
+                if (auto* s = activeSlice()) {
+                    if (id == QLatin1String("NB"))
+                        s->setNb(on);
+                    else
+                        s->setAnf(on);
+                }
+            } else {
+                requestClientNr(id, on);
+            }
+            // Whatever happened, the strip ends up showing what really runs:
+            // a refused switch must not leave a button lit.
+            QTimer::singleShot(400, this, [this] { refreshTitleDspStrip(); });
+        });
+        if (m_audio) {
+            auto syncNr = [this] {
+                if (auto* s = m_titleBar ? m_titleBar->dspStrip() : nullptr)
+                    s->setClientNrActive(activeAetherDspMethod());
+            };
+            connect(m_audio, &AudioEngine::nr2EnabledChanged, this, [syncNr](bool) { syncNr(); });
+            connect(m_audio, &AudioEngine::nr4EnabledChanged, this, [syncNr](bool) { syncNr(); });
+            connect(m_audio, &AudioEngine::mnrEnabledChanged, this, [syncNr](bool) { syncNr(); });
+            connect(m_audio, &AudioEngine::dfnrEnabledChanged, this, [syncNr](bool) { syncNr(); });
+            connect(m_audio, &AudioEngine::rn2EnabledChanged, this, [syncNr](bool) { syncNr(); });
+            connect(m_audio, &AudioEngine::nvAfxEnabledChanged, this, [syncNr](bool) { syncNr(); });
+            connect(m_audio, &AudioEngine::nnrEnabledChanged, this, [syncNr](bool) { syncNr(); });
+        }
+        // What the radio offers changes with the connection.
+        connect(&m_radioModel, &RadioModel::capabilitiesChanged, this,
+                [this](bool, const RadioCapabilities&) { refreshTitleDspStrip(); });
+        // Once the rest of the window exists (the AetherRX selector is asked).
+        QTimer::singleShot(0, this, [this] { refreshTitleDspStrip(); });
+    }
     restoreKnownUpdate();
     connect(m_titleBar, &TitleBar::minimalModeRequested,
             this, &MainWindow::toggleMinimalModeFromAction);
@@ -9130,14 +9169,23 @@ void MainWindow::refreshMiniPanFollow()
 void MainWindow::rebindActiveFrequencyDisplays()
 {
     disconnect(m_activeFreqDisplayConn);
+    disconnect(m_activeNbConn);
+    disconnect(m_activeAnfConn);
     auto* s = activeSlice();
     if (!s) {
         showActiveSliceFrequency(0.0);
+        refreshTitleDspStrip();
         return;
     }
     m_activeFreqDisplayConn = connect(s, &SliceModel::frequencyChanged, this,
                                       [this](double mhz) { showActiveSliceFrequency(mhz); });
+    // The title bar's NB and ANF switches show this slice's.
+    m_activeNbConn = connect(s, &SliceModel::nbChanged, this,
+                             [this](bool) { refreshTitleDspStrip(); });
+    m_activeAnfConn = connect(s, &SliceModel::anfChanged, this,
+                              [this](bool) { refreshTitleDspStrip(); });
     showActiveSliceFrequency(s->frequency());
+    refreshTitleDspStrip();
 }
 
 void MainWindow::showActiveSliceFrequency(double mhz)
