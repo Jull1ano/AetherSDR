@@ -31,6 +31,7 @@
 #include <QMouseEvent>
 #include <QPointer>
 #include <QPushButton>
+#include <QStyle>
 #include <QShortcut>
 #include <QKeySequence>
 #include <QActionEvent>
@@ -227,6 +228,35 @@ TitleBar::TitleBar(QWidget* parent)
     // The menu bar (Linux/Windows only — macOS puts it in the system bar) is
     // inserted here by setMenuBar(), after the brand and the UPDATE badge.
     m_menuBarSlot = m_hbox->count();
+
+    // ── brick3-angelia: POWER, as Thetis has it ─────────────────────────────
+    // Starts and stops the radio: on connects to the last radio, off
+    // disconnects. The button shows what the radio is doing, not the click.
+    m_powerBtn = new QPushButton(QStringLiteral("POWER"), this);
+    m_powerBtn->setObjectName(QStringLiteral("titlePowerButton"));
+    m_powerBtn->setCheckable(true);
+    m_powerBtn->setFocusPolicy(Qt::NoFocus);
+    m_powerBtn->setFixedSize(60, 26);
+    m_powerBtn->setCursor(Qt::PointingHandCursor);
+    m_powerBtn->setAccessibleName(QStringLiteral("Power"));
+    m_powerBtn->setStyleSheet(QStringLiteral(
+        "QPushButton#titlePowerButton { background: #1a2a3a; border: 1px solid #304050;"
+        " border-radius: 3px; color: #8fa8c0; font-size: 11px; font-weight: bold;"
+        " padding: 0px 6px; }"
+        "QPushButton#titlePowerButton:checked { background: #1a6030; color: #ffffff;"
+        " border: 1px solid #20a040; }"
+        "QPushButton#titlePowerButton:hover { border: 1px solid #0090e0; }"
+        "QPushButton#titlePowerButton[starting=\"true\"] { color: #e0b040;"
+        " border: 1px solid #a07820; }"));
+    connect(m_powerBtn, &QPushButton::clicked, this, [this](bool) {
+        const PowerState state = m_powerState;
+        m_powerBtn->setChecked(state == PowerState::On);
+        if (state == PowerState::Starting)
+            return;   // a connect is already under way
+        emit powerRequested(state == PowerState::Off);
+    });
+    m_hbox->addWidget(m_powerBtn);
+    setPowerState(PowerState::Off, QString());
 
     // ── 3. Radio tabs ───────────────────────────────────────────────────────
     m_radioTabs = new RadioTabBar(this);
@@ -1803,6 +1833,7 @@ void TitleBar::setMinimalMode(bool on)
     if (m_freqReadout) m_freqReadout->setVisible(!on);
     if (m_dspStrip) m_dspStrip->setVisible(!on);
     if (m_vfoStrip) m_vfoStrip->setVisible(!on);
+    if (m_powerBtn) m_powerBtn->setVisible(!on);
     m_pcBtn->setVisible(!on);
     m_speakerBtn->setVisible(!on);
     m_headphoneBtn->setVisible(!on);
@@ -1826,6 +1857,22 @@ void TitleBar::setMinimalMode(bool on)
     // Don't touch m_otherTxLabel or m_mfBtn — their visibility is
     // managed by setOtherClientTx() and setMultiFlexStatus() respectively
     updateMaximizeIcon();
+}
+
+void TitleBar::setPowerState(PowerState state, const QString& toolTip)
+{
+    m_powerState = state;
+    if (!m_powerBtn)
+        return;
+    m_powerBtn->setChecked(state == PowerState::On);
+    const bool starting = state == PowerState::Starting;
+    if (m_powerBtn->property("starting").toBool() != starting) {
+        m_powerBtn->setProperty("starting", starting);
+        m_powerBtn->style()->unpolish(m_powerBtn);
+        m_powerBtn->style()->polish(m_powerBtn);
+    }
+    m_powerBtn->setToolTip(toolTip);
+    m_powerBtn->setAccessibleDescription(toolTip);
 }
 
 } // namespace AetherSDR

@@ -730,6 +730,8 @@ void MainWindow::wireDiscovery()
     scheduleRadioTabRefresh();
     connect(m_connPanel, &ConnectionPanel::disconnectRequested,
             this, &MainWindow::disconnectFromRadioByUser);
+    // brick3-angelia: the title bar's POWER (MainWindow_Power.cpp).
+    wirePowerButton();
 
     // ── SmartLink ──────────────────────────────────────────────────────────
     m_connPanel->setSmartLinkClient(&m_smartLink);

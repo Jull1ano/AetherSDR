@@ -2139,6 +2139,14 @@ private:
     QuickVfoMemory m_quickVfo;
     QTimer* m_quickVfoDwellTimer{nullptr};
     QString m_quickVfoScopeKey;   // the radio m_quickVfo was loaded for; empty: none
+    // brick3-angelia: the title bar's POWER (MainWindow_Power.cpp): on
+    // connects to the last radio connected (AppSettings "PowerButtonRadio",
+    // which a disconnect keeps, unlike LastConnectedRadioSerial), off
+    // disconnects as the radio tab's Disconnect does.
+    void wirePowerButton();
+    void refreshPowerButton();
+    bool m_powerStarting{false};
+    QTimer* m_powerStartTimer{nullptr};
     QMetaObject::Connection m_activeModeConn;     // active-slice mode → quick VFO dwell
     QMetaObject::Connection m_activeFilterConn;   // active-slice filter → quick VFO dwell
     class ClientCompEditor* m_clientCompEditor{nullptr}; // lazy — created on first Edit… click

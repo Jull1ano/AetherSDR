@@ -1324,6 +1324,7 @@ set(GUI_SOURCES
     src/gui/MainWindow_Controllers.cpp
     src/gui/MainWindow_DspApplets.cpp
     src/gui/MainWindow_QuickVfo.cpp
+    src/gui/MainWindow_Power.cpp
     src/gui/MainWindow_Menus.cpp
     src/gui/MainWindow_Session.cpp
     src/gui/MainWindow_Shortcuts.cpp

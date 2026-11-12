@@ -146,6 +146,11 @@ public:
     // brick3-angelia: the NB / ANF / noise-reduction switches beside it.
     TitleDspStrip* dspStrip() const { return m_dspStrip; }
     TitleVfoStrip* vfoStrip() const { return m_vfoStrip; }
+    // brick3-angelia: Thetis's POWER, left of the radio tabs. Lit while
+    // connected; amber while a connect it started is under way. MainWindow
+    // sets the state; a click only asks (powerRequested).
+    enum class PowerState { Off, Starting, On };
+    void setPowerState(PowerState state, const QString& toolTip);
 
     // Introspection for the automation bridge (`titlebar` model): the whole
     // bar — geometry, brand, tabs, audio cluster, window controls.
@@ -173,6 +178,8 @@ signals:
     // was chosen.  MainWindow owns what those mean.
     void radioTabActivated(const QString& radioId);
     void connectManuallyRequested();
+    // POWER was clicked: on = connect to the radio, off = disconnect.
+    void powerRequested(bool on);
 
 public:
     // Open the feature-request dialog.  Wired from Help → Submit your idea…
@@ -221,6 +228,8 @@ private:
     RadioTabBar* m_radioTabs{nullptr};
     QLabel*      m_experimentalRadioLabel{nullptr};
     QPushButton* m_updateBadge{nullptr};
+    QPushButton* m_powerBtn{nullptr};
+    PowerState m_powerState{PowerState::Off};
     QString m_stagedVersion;
     QString      m_updateVersion;
     void refreshUpdateBadge();
