@@ -45,6 +45,11 @@ Configure the receive front end under **Settings → Radio Setup... → Radio �
 - **Panadapter** computed by WDSP's display analyzer: a ≥16384-point windowed FFT at one point per screen pixel. **FFT AVG** and **Wt Avg** (shown as **Log Avg**) drive it, and noise-floor auto-adjust works. The Display panel also offers the sample **Rate**, the **FFT Size** (4096–262144) and the FFT **Window**.
 - **Receive audio cushion** (Radio Setup → ANAN Front End → This Computer's Speaker): how much receive audio is queued ahead of this computer's speaker, 10–200 ms, default 100 ms. Lower it for less audio delay; if the audio starts to tick, go back up (100 ms is the value that cured the ticks). It takes effect at once.
 - **Noise blanker, automatic notch (ANF) and manual notches (MNF)**, all in WDSP on this computer. The title bar has a switch for each beside the frequency readout. Manual notches are placed from the spectrum's right-click menu (or by right-clicking **MNF**, which adds one in the middle of the passband) and dragged onto the carrier; the narrowest notch is 200 Hz. The notches and the **MNF** switch are remembered per radio.
+- **Quick VFO controls**, right of the title bar's DSP switches, as in Thetis:
+    - **A** / **B**: two VFOs on the one receiver. The lit one is what you hear; click the other to jump to it, and back. Each keeps its own frequency, mode and filter. The first time, **B** starts where **A** is. The other VFO's frequency is shown beside the buttons.
+    - **A=B** copies the VFO you are listening to into the other one.
+    - **Save** stores the frequency, mode and filter; **Restore** tunes back to it. Hover over **Restore** to see what is stored.
+    - **◀ ▼ ▶**: the last 16 frequencies you stayed on for 4 seconds, newest first. **▼** lists them: pick one to tune to it, or **Clear history**. **◀** steps towards the newest, **▶** towards the oldest. **▼** flashes green when a frequency is added, and orange when a listed one changes mode or filter.
 - **S-meter.**
 - **SQL** (squelch) works per mode family, in WDSP on this computer. Click **SQL** to switch it on, then set the slider; 0 is always open.
     - **FM, NFM:** a noise squelch. It opens when a carrier quiets the receiver's hiss, whatever its strength, so one setting holds across bands. Higher needs a cleaner signal: with the default 16 kHz filter, 10 opens on a signal about 6 dB over the noise, 20 about 10 dB, 40 about 20 dB. It listens to the hiss above 5 kHz, so keep the FM filter 8 kHz or wider. At 8 kHz, noise is muted at once from 20 up, and a signal 15 dB over the noise still opens it at 50; that width suits narrow FM such as CB best. With a 6 kHz filter the noise only stays muted from about 40: below that it keeps flickering the squelch open, and each time the audio hangs for about a second.
@@ -80,7 +85,7 @@ To measure your own radio instead, open **Settings → Radio Setup... → Droop 
 
 ### What is remembered
 
-The G2 stores none of its settings, so AetherSDR keeps these per radio: frequency and mode (14.175 MHz USB on a first connect), tuning step, **RF Gain**, the AGC mode, **AGC-T** and AGC-off level, the squelch switch and level, the radio's own output level (what the volume slider sets with PC Audio off) and the panadapter dBm range. The span always starts at the connect form's **Sample rate:**. FFT averaging starts from its defaults.
+The G2 stores none of its settings, so AetherSDR keeps these per radio: frequency and mode (14.175 MHz USB on a first connect), tuning step, **RF Gain**, the AGC mode, **AGC-T** and AGC-off level, the squelch switch and level, the quick VFO controls (which VFO you are on, the other VFO, the **Save** slot and the frequency history), the radio's own output level (what the volume slider sets with PC Audio off) and the panadapter dBm range. The span always starts at the connect form's **Sample rate:**. FFT averaging starts from its defaults.
 
 ### Not available on the G2
 

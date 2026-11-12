@@ -1307,6 +1307,14 @@ add_executable(anan_p2_protocol_test
 target_include_directories(anan_p2_protocol_test PRIVATE src)
 add_test(NAME anan_p2_protocol_test COMMAND anan_p2_protocol_test)
 
+# brick3-angelia: the title bar's VFO A/B, Save/Restore and frequency history
+# (QuickVfoMemory). Plain C++, no Qt.
+add_executable(quick_vfo_memory_test
+    tests/quick_vfo_memory_test.cpp
+    src/core/QuickVfoMemory.cpp)
+target_include_directories(quick_vfo_memory_test PRIVATE src)
+add_test(NAME quick_vfo_memory_test COMMAND quick_vfo_memory_test)
+
 # ANAN RX DSP — IQ -> WdspChannel demod + AnanPanAnalyzer (WDSP analyzer). Links aethercore
 # (WDSP+FFTW), unlike anan_p2_protocol_test above. *** READ HERMES.md §16
 # and this file's own header comment before touching expected values here —

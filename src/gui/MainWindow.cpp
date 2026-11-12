@@ -5625,6 +5625,9 @@ void MainWindow::buildUI()
         // Once the rest of the window exists (the AetherRX selector is asked).
         QTimer::singleShot(0, this, [this] { refreshTitleDspStrip(); });
     }
+    // brick3-angelia: the quick VFO strip right of the DSP switches
+    // (VFO A / B, Save / Restore, the frequency history).
+    wireTitleVfoStrip();
     restoreKnownUpdate();
     connect(m_titleBar, &TitleBar::minimalModeRequested,
             this, &MainWindow::toggleMinimalModeFromAction);
@@ -9195,14 +9198,29 @@ void MainWindow::rebindActiveFrequencyDisplays()
     disconnect(m_activeFreqDisplayConn);
     disconnect(m_activeNbConn);
     disconnect(m_activeAnfConn);
+    disconnect(m_activeModeConn);
+    disconnect(m_activeFilterConn);
     auto* s = activeSlice();
     if (!s) {
         showActiveSliceFrequency(0.0);
         refreshTitleDspStrip();
+        if (m_quickVfoDwellTimer)
+            m_quickVfoDwellTimer->stop();
+        refreshTitleVfoStrip();
         return;
     }
+    // The quick VFO history records where this slice stays (MainWindow_QuickVfo).
     m_activeFreqDisplayConn = connect(s, &SliceModel::frequencyChanged, this,
-                                      [this](double mhz) { showActiveSliceFrequency(mhz); });
+                                      [this](double mhz) {
+        showActiveSliceFrequency(mhz);
+        restartQuickVfoDwell();
+    });
+    m_activeModeConn = connect(s, &SliceModel::modeChanged, this,
+                               [this](const QString&) { restartQuickVfoDwell(); });
+    m_activeFilterConn = connect(s, &SliceModel::filterChanged, this,
+                                 [this](int, int) { restartQuickVfoDwell(); });
+    restartQuickVfoDwell();
+    refreshTitleVfoStrip();
     // The title bar's NB and ANF switches show this slice's.
     m_activeNbConn = connect(s, &SliceModel::nbChanged, this,
                              [this](bool) { refreshTitleDspStrip(); });

@@ -11,6 +11,7 @@
 #include "RadioTabBar.h"
 #include "ReleaseTagText.h"
 #include "TitleDspStrip.h"
+#include "TitleVfoStrip.h"
 #include "TitleFrequencyReadout.h"
 #include "WindowCaptionButtons.h"
 #include "core/NetworkDiagnostics.h"
@@ -298,6 +299,11 @@ TitleBar::TitleBar(QWidget* parent)
     // NR / NB / ANF grid beside the VFO.
     m_dspStrip = new TitleDspStrip(this);
     m_hbox->addWidget(m_dspStrip, 0, Qt::AlignVCenter);
+    // ...then the quick VFO controls (A / B, Save / Restore, the history),
+    // where Thetis keeps them, between the VFO and the rest of the console.
+    m_hbox->addSpacing(6);
+    m_vfoStrip = new TitleVfoStrip(this);
+    m_hbox->addWidget(m_vfoStrip, 0, Qt::AlignVCenter);
     m_hbox->addWidget(makeDragGutter(), 1);
 
     // ── 5. Audio cluster ────────────────────────────────────────────────────
@@ -1796,6 +1802,7 @@ void TitleBar::setMinimalMode(bool on)
     if (m_radioTabs) m_radioTabs->setCompactMode(on);
     if (m_freqReadout) m_freqReadout->setVisible(!on);
     if (m_dspStrip) m_dspStrip->setVisible(!on);
+    if (m_vfoStrip) m_vfoStrip->setVisible(!on);
     m_pcBtn->setVisible(!on);
     m_speakerBtn->setVisible(!on);
     m_headphoneBtn->setVisible(!on);

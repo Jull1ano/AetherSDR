@@ -31,6 +31,7 @@ class BrandMark;
 class PersistentDialog;
 class TitleDspStrip;
 class TitleFrequencyReadout;
+class TitleVfoStrip;
 class WindowCaptionButtons;
 
 class TitleBar : public QWidget {
@@ -144,6 +145,7 @@ public:
     TitleFrequencyReadout* frequencyReadout() const { return m_freqReadout; }
     // brick3-angelia: the NB / ANF / noise-reduction switches beside it.
     TitleDspStrip* dspStrip() const { return m_dspStrip; }
+    TitleVfoStrip* vfoStrip() const { return m_vfoStrip; }
 
     // Introspection for the automation bridge (`titlebar` model): the whole
     // bar — geometry, brand, tabs, audio cluster, window controls.
@@ -226,6 +228,7 @@ private:
     QPushButton* m_mfBtn{nullptr};
     TitleFrequencyReadout* m_freqReadout{nullptr};
     TitleDspStrip* m_dspStrip{nullptr};
+    TitleVfoStrip* m_vfoStrip{nullptr};
     QPushButton* m_pcBtn{nullptr};
     QPushButton* m_speakerBtn{nullptr};
     QPushButton* m_headphoneBtn{nullptr};

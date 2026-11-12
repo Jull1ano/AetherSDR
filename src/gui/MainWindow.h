@@ -22,6 +22,7 @@
 #include "models/SliceLinkPolicy.h"
 #include "core/AppSettings.h"
 #include "core/FirmwareCurrency.h"
+#include "core/QuickVfoMemory.h"
 #include "models/VoiceKeyerSource.h"
 #include "core/AetherDspModePolicy.h"
 #include "core/KiwiSdrTxMutePolicy.h"  // optimistic-unkey Kiwi mute latch
@@ -2123,6 +2124,23 @@ private:
     // and what is running now (NB/ANF from the active slice, the noise
     // reduction from the audio engine).
     void refreshTitleDspStrip();
+    // brick3-angelia: the title bar's quick VFO strip (MainWindow_QuickVfo.cpp):
+    // VFO A / B on one receiver, Save / Restore, and the frequency history.
+    // m_quickVfo holds the state, stored per radio as the "QuickVfo" feature
+    // document; the dwell timer restarts on every active-slice frequency,
+    // mode or filter change and records the history entry when it fires.
+    void wireTitleVfoStrip();
+    void loadQuickVfo();
+    void storeQuickVfo();
+    void refreshTitleVfoStrip();
+    void restartQuickVfoDwell();
+    QuickVfoSetting liveQuickVfoSetting() const;
+    void tuneToQuickVfo(const QuickVfoSetting& setting, const char* source);
+    QuickVfoMemory m_quickVfo;
+    QTimer* m_quickVfoDwellTimer{nullptr};
+    QString m_quickVfoScopeKey;   // the radio m_quickVfo was loaded for; empty: none
+    QMetaObject::Connection m_activeModeConn;     // active-slice mode → quick VFO dwell
+    QMetaObject::Connection m_activeFilterConn;   // active-slice filter → quick VFO dwell
     class ClientCompEditor* m_clientCompEditor{nullptr}; // lazy — created on first Edit… click
     class ClientGateEditor* m_clientGateEditor{nullptr}; // lazy — created on first Edit… click
     class ClientTubeEditor* m_clientTubeEditor{nullptr}; // lazy — created on first Edit… click

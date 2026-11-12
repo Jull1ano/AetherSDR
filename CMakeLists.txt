@@ -985,6 +985,7 @@ set(CORE_SOURCES
     src/core/AdaptiveFilterEngine.cpp
     src/core/OccupiedRegion.cpp
     src/core/BandStackSettings.cpp
+    src/core/QuickVfoMemory.cpp
     src/core/RadioDiscovery.cpp
     src/core/NetworkPathResolver.cpp
     src/core/TgxlConnection.cpp
@@ -1322,6 +1323,7 @@ set(GUI_SOURCES
     src/gui/WindowShowState.cpp
     src/gui/MainWindow_Controllers.cpp
     src/gui/MainWindow_DspApplets.cpp
+    src/gui/MainWindow_QuickVfo.cpp
     src/gui/MainWindow_Menus.cpp
     src/gui/MainWindow_Session.cpp
     src/gui/MainWindow_Shortcuts.cpp
@@ -1578,6 +1580,7 @@ set(GUI_SOURCES
     src/gui/GreenHeronApplet.cpp
     src/gui/TitleBar.cpp
     src/gui/TitleDspStrip.cpp
+    src/gui/TitleVfoStrip.cpp
     src/gui/TitleFrequencyReadout.cpp
     src/gui/RoundedMenu.cpp
     src/gui/StatusIndicator.cpp
