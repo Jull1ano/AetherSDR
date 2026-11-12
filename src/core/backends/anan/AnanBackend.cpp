@@ -1527,7 +1527,8 @@ double AnanBackend::viewSpanHz() const noexcept
 
 double AnanBackend::viewSlackHz() const noexcept
 {
-    return (0.5 - kPanEdgeCropFraction) * std::max(0.0, rateHz() - viewSpanHz());
+    return std::max(0.0, (0.5 - kPanEdgeZoneFraction) * rateHz()
+                             - (0.5 - kPanEdgeCropFraction) * viewSpanHz());
 }
 
 void AnanBackend::moveDdcToHoldView()

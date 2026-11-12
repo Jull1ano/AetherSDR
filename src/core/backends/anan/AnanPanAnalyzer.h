@@ -37,9 +37,8 @@ public:
         // or the point count when that is larger); otherwise rounded up to a
         // power of two in kSmallestFftSize..kMaxFftSize. A smaller FFT follows
         // signals faster and looks grainier; a larger one averages more bins
-        // into each point, so the trace is calmer and slower. Read by create()
-        // only: a new size re-plans FFTW_PATIENT, which no setter may do on
-        // the feeding thread -- the owner rebuilds instead.
+        // into each point, so the trace is calmer and slower. Live: see
+        // setFftSize() (the plans are estimated, WDSP patch 24).
         int fftSize = 0;
         // brick3-angelia: WDSP's analyzer window, 0..kWindowCount-1:
         // 0 rectangular, 1 Blackman-Harris (4-term), 2 Hann, 3 flat-top,

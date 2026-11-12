@@ -404,8 +404,12 @@ private:
     }
     // How far the view's centre may sit from the DDC's. The screen shows the
     // middle (1 - 2 * kPanEdgeCropFraction) of the reported span, and that
-    // part stays inside the same part of the captured band, so a zoomed view
-    // never shows the band's rolled-off edge. Zero for the whole-band view.
+    // part stays inside the band's flat middle -- clear of the outer
+    // kPanEdgeZoneFraction each side, where the DDC rolls off and the trace
+    // is a correction, not a measurement -- so a zoomed view never shows the
+    // band's edge. Zero for the whole-band view, and for any view too wide to
+    // fit in that middle: those sit centred on the DDC and show the edges as
+    // the whole band always has.
     [[nodiscard]] double viewSlackHz() const noexcept;
     // setPanCenter() and setPanBandwidth() only note what was asked; one
     // queued commitViewRequest() applies both, so a zoom about the cursor --
@@ -525,6 +529,11 @@ private:
     // radio: gui/SpectrumPreviewLogic.h's kEdgeTaperFraction, restated here
     // because nothing below the seam may include a GUI header.
     static constexpr double kPanEdgeCropFraction = 0.04;
+    // The share of the captured band, at EACH edge, inside the DDC's roll-off
+    // (AnanDroopDefaults: the correction reaches about 8.6 % in). Measured on
+    // a Brick3 (gateware 121): the shipped correction, derived on another
+    // board, overshoots by some 10 dB at 4-7 % from the edge.
+    static constexpr double kPanEdgeZoneFraction = 0.09;
     // The narrowest view, as a share of the captured band.
     static constexpr double kMinViewFraction = 1.0 / 512.0;
     // What applyRestoredState() accepted, held for connectRadio(); kept apart

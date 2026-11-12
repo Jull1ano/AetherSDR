@@ -73,9 +73,8 @@ public:
         // current by setSpectrumLogAverage().
         bool spectrumLogAverage = true;
         // brick3-angelia: the operator's FFT size (0 = automatic) and window
-        // for the panadapter analyzer -- AnanPanAnalyzer::Settings. The size
-        // is build-time only (a new one is a rebuild); the window is also kept
-        // current by setPanWindow().
+        // for the panadapter analyzer -- AnanPanAnalyzer::Settings. Kept
+        // current by setPanFftSize() and setPanWindow(); both apply live.
         int panFftSize = 0;
         int panWindow = AnanPanAnalyzer::kDefaultWindow;
         // brick3-angelia: the part of the sampled band on screen, as

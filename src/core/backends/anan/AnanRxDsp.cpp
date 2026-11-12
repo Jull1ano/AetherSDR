@@ -707,9 +707,9 @@ void AnanRxDsp::processIqBlock(const std::vector<std::complex<float>>& iq)
     retargetAnalyzerIfSettled();
     if (spectrumFrameDue() && m_analyzer->takeFrame(m_bins)) {
         // Real DDC0 roll-off -- the anti-alias FIR's transition band, not CIC
-        // sin(x)/x (see AnanDroopCorrection.h). The analyzer's points are
-        // already time-averaged, so the correction lands on the averaged
-        // level. inputSampleRateHz is always an exact multiple of 1000 for
+        // sin(x)/x (see AnanDroopCorrection.h). Applied to each raw frame,
+        // before smoothFrame() averages it: a fixed dB offset per point, so
+        // the order does not matter. inputSampleRateHz is always an exact multiple of 1000 for
         // the six valid DDC0 rates.
         const DroopCorrectionTable& droopTable =
             droopTableForRate(m_config.inputSampleRateHz / 1000);

@@ -52,8 +52,9 @@ inline void applyDroopCorrectionDbWindowed(std::vector<float>& pointsDb,
 // detector, so a zoomed-out read keeps the noise floor where it was); where
 // the two grids are about as fine, each output point takes its nearest source
 // point; where the source is coarser, the output is interpolated between the
-// two nearest. Output points outside the source take the frame's lowest
-// value: nothing is known there until the analyzer has been re-aimed.
+// two nearest. Output points outside the source take the frame's median --
+// its noise floor, near enough: nothing is known there until the analyzer has
+// been re-aimed, and the floor is the least surprising thing to draw.
 // `outside`, when given, is the value for output points outside the source
 // instead of the frame's lowest (a NaN there lets the caller fill them in).
 inline void resamplePanWindow(const std::vector<float>& src, double srcLow, double srcHigh,
@@ -66,7 +67,23 @@ inline void resamplePanWindow(const std::vector<float>& src, double srcLow, doub
         std::fill(out.begin(), out.end(), m > 0 ? src.front() : -160.0f);
         return;
     }
-    const float floorDb = outside ? *outside : *std::min_element(src.begin(), src.end());
+    // Worked out only if an output point really falls outside the source.
+    float floorDb = 0.0f;
+    bool haveFloor = false;
+    const auto fill = [&]() {
+        if (!haveFloor) {
+            if (outside) {
+                floorDb = *outside;
+            } else {
+                std::vector<float> sorted(src);
+                const auto mid = sorted.begin() + static_cast<std::ptrdiff_t>(sorted.size() / 2);
+                std::nth_element(sorted.begin(), mid, sorted.end());
+                floorDb = *mid;
+            }
+            haveFloor = true;
+        }
+        return floorDb;
+    };
     // Band fraction per point, on each grid.
     const double srcStep = (srcHigh - srcLow) / static_cast<double>(m - 1);
     const double dstStep = (dstHigh - dstLow) / static_cast<double>(count - 1);
@@ -77,7 +94,7 @@ inline void resamplePanWindow(const std::vector<float>& src, double srcLow, doub
         const double fraction = dstLow + dstStep * static_cast<double>(i);
         const double x = (fraction - srcLow) / srcStep;   // position among the source points
         if (x < -0.5 || x > lastIndex + 0.5) {
-            out[i] = floorDb;
+            out[i] = fill();
             continue;
         }
         if (half >= 0.75) {
@@ -90,7 +107,7 @@ inline void resamplePanWindow(const std::vector<float>& src, double srcLow, doub
                 for (std::size_t j = first; j <= end; ++j)
                     sum += std::pow(10.0, static_cast<double>(src[j]) / 10.0);
                 const double mean = sum / static_cast<double>(end - first + 1);
-                out[i] = mean > 0.0 ? static_cast<float>(10.0 * std::log10(mean)) : floorDb;
+                out[i] = mean > 0.0 ? static_cast<float>(10.0 * std::log10(mean)) : fill();
                 continue;
             }
         }
