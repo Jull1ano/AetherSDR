@@ -334,8 +334,14 @@ AnanBackend::AnanBackend(QObject* parent)
         pushView();
         // The notches' frame of reference, then the last session's notches.
         pushNotchTune();
-        if (!wasRateChange)
+        if (!wasRateChange) {
             replayRestoredNotches();
+            // ...and the switch: the notch model was reset to "on" for this
+            // session and nothing else on a host-DSP radio reports it.
+            AetherSDR::RadioDelta notchSwitch;
+            notchSwitch.tnfEnabled = m_notchesEnabled;
+            emit radioChanged(notchSwitch);
+        }
         // The RF Gain slider IS the step attenuator: -31..0 dB in 1 dB steps.
         // Same every linkUp, for the same reason as the limits above.
         emit panRfGainInfoChanged(kPanId, -kMaxStepAttenuationDb, 0, 1);
@@ -742,8 +748,16 @@ void AnanBackend::applyRestoredState(const RestoredRadioState& state)
     m_restoredRateKsps = state.sampleRateHz > 0
         ? nearestDdc0RateKsps(state.sampleRateHz / 1000) : 0;
     // brick3-angelia: the manual notches, unconditional like the rest.
+    // An object -- the switch and the entries -- since the switch is kept;
+    // the first build that kept notches wrote the entries alone, as an array.
     m_restoredNotches.clear();
-    for (const QJsonValue& value : state.extension.value(QStringLiteral("notches")).toArray()) {
+    const QJsonValue notchesValue = state.extension.value(QStringLiteral("notches"));
+    const QJsonObject notchesObject = notchesValue.toObject();
+    m_notchesEnabled = notchesObject.value(QStringLiteral("enabled")).toBool(true);
+    const QJsonArray notchEntries = notchesValue.isArray()
+        ? notchesValue.toArray()
+        : notchesObject.value(QStringLiteral("entries")).toArray();
+    for (const QJsonValue& value : notchEntries) {
         const QJsonObject o = value.toObject();
         NotchRecord notch;
         notch.centerHz = o.value(QStringLiteral("centerHz")).toDouble();
@@ -819,7 +833,9 @@ RestoredRadioState AnanBackend::currentOperatingState() const
                                    {QStringLiteral("widthHz"), notch.widthHz},
                                    {QStringLiteral("active"), notch.active}});
     }
-    state.extension.insert(QStringLiteral("notches"), notches);
+    state.extension.insert(QStringLiteral("notches"), QJsonObject{
+        {QStringLiteral("enabled"), m_notchesEnabled},
+        {QStringLiteral("entries"), notches}});
     // brick3-angelia: the zoom inside the rate above; 0 = the whole band.
     state.extension.insert(QStringLiteral("panView"), QJsonObject{
         {QStringLiteral("spanHz"), viewSpanHz() < rateHz() ? viewSpanHz() : 0.0}});
@@ -985,13 +1001,14 @@ void AnanBackend::connectRadio(const RadioConnectRequest& request)
     m_viewSpanHz = m_restoredViewSpanHz;
     // No notches until the link is up: the model above was cleared for this
     // session, and replayRestoredNotches() reports each one it puts back.
+    // The switch is as the last session left it (applyRestoredState()), and
+    // linkUp tells the model, which starts every session switched on.
     m_notches.clear();
-    m_notchesEnabled = true;
     m_notchReplayPending = !m_restoredNotches.empty();
     if (m_dsp) {
         QMetaObject::invokeMethod(m_dsp, "clearNotches", Qt::QueuedConnection);
         QMetaObject::invokeMethod(m_dsp, "setNotchesEnabled", Qt::QueuedConnection,
-                                  Q_ARG(bool, true));
+                                  Q_ARG(bool, m_notchesEnabled));
     }
 
     m_speakerAudioEnabled = m_pendingParams.speakerAudioEnabled;
@@ -1229,10 +1246,19 @@ void AnanBackend::setSliceFrequency(int sliceId, double hz)
     // spectrum holds still and only the VFO moves, as in Thetis and
     // Hl2Backend::setSliceFrequency(). Leaving it recentres the DDC.
     if (!(m_ncoHz > 0.0) || std::abs(hz - m_ncoHz) > usableHalfSpanHz()) {
+        // A jump to somewhere the view does not show -- a memory, a spot, a
+        // frequency from another program -- takes the view with it, centred
+        // on the slice as Thetis does. Left where it was, the view was only
+        // pulled to the nearest edge of the new band, with the slice near
+        // its own edge. Tuning step by step never gets here with the slice
+        // out of sight, so a zoomed view still holds still for that.
+        if (std::abs(hz - viewCenterHz()) > (0.5 - kPanEdgeCropFraction) * viewSpanHz())
+            m_viewCenterHz = hz;
         m_ncoHz = hz;
-        // The view stays where it is if it still fits in the band, and is
-        // pulled to its edge if not (brick3-angelia). At the whole-band view
-        // that is the old behaviour: it recentres with the DDC.
+        // Otherwise the view stays where it is if it still fits in the band,
+        // and is pulled to its edge if not (brick3-angelia). At the
+        // whole-band view that is the old behaviour: it recentres with the
+        // DDC.
         pullViewIntoBand();
     }
     // Digit readout / slice model: unthrottled. Cheap (no radio round trip,
@@ -1763,11 +1789,15 @@ void AnanBackend::removeNotch(int notchId)
 
 void AnanBackend::setNotchesEnabled(bool on)
 {
+    const bool changed = m_notchesEnabled != on;
     m_notchesEnabled = on;
     if (m_dsp) {
         QMetaObject::invokeMethod(m_dsp, "setNotchesEnabled", Qt::QueuedConnection,
                                   Q_ARG(bool, on));
     }
+    // Kept with the notches, so MNF comes back as it was left.
+    if (changed)
+        emit operatingStateChanged();
 }
 
 int AnanBackend::sanitizedPanFftSize(int requested) noexcept

@@ -43,7 +43,7 @@ Configure the receive front end under **Settings → Radio Setup... → Radio �
 
 - **Receive** with live tuning and zoom. The sample rate (the Display panel's **Rate**) sets how much spectrum is captured; zooming and panning move the view inside it without changing the rate, as in Thetis.
 - **Panadapter** computed by WDSP's display analyzer: a ≥16384-point windowed FFT at one point per screen pixel. **FFT AVG** and **Wt Avg** (shown as **Log Avg**) drive it, and noise-floor auto-adjust works. The Display panel also offers the sample **Rate**, the **FFT Size** (4096–262144) and the FFT **Window**.
-- **Noise blanker, automatic notch (ANF) and manual notches (MNF)**, all in WDSP on this computer. The title bar has a switch for each beside the frequency readout. Manual notches are placed from the spectrum's right-click menu (or by right-clicking **MNF**, which adds one in the middle of the passband) and dragged onto the carrier; the narrowest notch is 200 Hz. They are remembered per radio.
+- **Noise blanker, automatic notch (ANF) and manual notches (MNF)**, all in WDSP on this computer. The title bar has a switch for each beside the frequency readout. Manual notches are placed from the spectrum's right-click menu (or by right-clicking **MNF**, which adds one in the middle of the passband) and dragged onto the carrier; the narrowest notch is 200 Hz. The notches and the **MNF** switch are remembered per radio.
 - **S-meter.**
 - **NB** cycles Off → **NB** → **NB2** → Off: WDSP's two impulse blankers, run on this computer before the demodulator. **NB** silences each impulse; **NB2** reconstructs the blanked window from the samples either side, and shows an **NB2** fill selector (**Zero**, **Sample hold**, **Mean hold**, **Hold sample** or **Interpolate**) while it runs. Neither is offered in FM.
 - **AGC-T** sets the AGC's maximum gain from −20 to 120 dB, 1.4 dB per slider step, starting at 71 (79.4 dB). With AGC off it sets the fixed gain instead, starting at 29 (20.6 dB). The slider's tooltip shows the gain in dB.
@@ -63,7 +63,7 @@ The G2's DDC loses a little amplitude near the edges of the displayed span. Aeth
 
 To measure your own radio instead, open **Settings → Radio Setup... → Droop Correction** while connected:
 
-1. Disconnect the antenna or terminate it in a dummy load. The sweep uses the receiver's own noise floor as a flat reference, so a live signal biases the result.
+1. Disconnect the antenna or terminate it in a dummy load. The sweep uses the receiver's own noise floor as a flat reference, so a live signal biases the result. If that is awkward, tune to a quiet band and pull **RF Gain** all the way down (-31 dB) for the sweep: with the step attenuator fully in, the ADC's own noise covers what the antenna still delivers. Put RF Gain back afterwards.
 2. Click **Start Sweep**. It steps through every DDC0 sample rate and takes several minutes. **Stop** ends it early.
 3. Review the measured correction per rate, then click **Apply** to use and save it for this radio, or **Discard**.
 
