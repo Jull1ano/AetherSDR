@@ -665,6 +665,12 @@ private:
     // radioId explicitly.
     QString m_radioSerial;
     AnanDroopCalibrator m_droopCalibrator;
+    // brick3-angelia: this radio's own calibration as read from its settings
+    // at connect (and as last applied). The calibrator only holds what THIS
+    // session measured, so without these the status page called a saved
+    // calibration "shipped default" after every restart, with the default's
+    // numbers, while the saved tables were the ones on the display.
+    QMap<int, DroopCorrectionTable> m_savedDroopTables;
     QString m_droopMessage;
     int m_droopPercent = 0;
     void publishDroopStatus();

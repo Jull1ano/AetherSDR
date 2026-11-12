@@ -4892,14 +4892,16 @@ QWidget* RadioSetupDialog::buildDroopCalibrationTab()
                 // Tag the source per rate. A partial sweep leaves the rest on
                 // the shipped default, and collapsing the two into one list
                 // would hide which is which -- see AnanBackend::droopStatus().
-                const bool measured =
-                    correction.value(QStringLiteral("source")).toString()
-                        == QLatin1String("measured");
+                const QString source = correction.value(QStringLiteral("source")).toString();
+                const bool measured = source == QLatin1String("measured");
+                // "saved": measured on this radio in an earlier session.
+                const bool saved = source == QLatin1String("saved");
                 lines << QStringLiteral("%1 ksps: %2–%3 dB  (%4)")
                     .arg(correction.value(QStringLiteral("rateKsps")).toInt(), 4)
                     .arg(correction.value(QStringLiteral("minDb")).toDouble(), 0, 'f', 1)
                     .arg(correction.value(QStringLiteral("maxDb")).toDouble(), 0, 'f', 1)
                     .arg(measured ? QStringLiteral("measured")
+                         : saved  ? QStringLiteral("measured earlier, saved for this radio")
                                   : QStringLiteral("shipped default"));
             }
         }

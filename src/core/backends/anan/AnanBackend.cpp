@@ -897,6 +897,7 @@ void AnanBackend::connectRadio(const RadioConnectRequest& request)
             RadioSettingsScope(QStringLiteral("anan"), m_radioSerial));
         for (auto it = tables.constBegin(); it != tables.constEnd(); ++it)
             pushTable(it.key(), it.value());
+        m_savedDroopTables = tables;   // for droopStatus()
     }
 
     m_pendingParams.host = request.host;
@@ -2170,12 +2171,18 @@ QVariantMap AnanBackend::droopStatus() const
     for (const int rateKsps : defaultDroopRatesKsps()) {
         const auto it = measured.constFind(rateKsps);
         const bool isMeasured = it != measured.constEnd();
+        // brick3-angelia: neither of those, but measured on this radio in an
+        // earlier session and in use since connect.
+        const auto saved = m_savedDroopTables.constFind(rateKsps);
+        const bool isSaved = !isMeasured && m_connected
+            && saved != m_savedDroopTables.constEnd();
         // A default is only live once connectRadio() has actually seeded it.
         // Before that the rate genuinely carries no correction and must not
         // claim one -- measured results, by contrast, outlive the connection
         // because the calibrator holds them for the session.
         const DroopCorrectionTable* table =
             isMeasured ? &it.value()
+            : isSaved  ? &saved.value()
                        : (m_connected ? defaultDroopTableForRate(rateKsps) : nullptr);
         if (!table)
             continue;
@@ -2185,6 +2192,7 @@ QVariantMap AnanBackend::droopStatus() const
             {QStringLiteral("minDb"), *lo},
             {QStringLiteral("maxDb"), *hi},
             {QStringLiteral("source"), isMeasured ? QStringLiteral("measured")
+                                       : isSaved  ? QStringLiteral("saved")
                                                   : QStringLiteral("default")}});
     }
     return {{QStringLiteral("running"), m_droopCalibrator.isRunning()},
@@ -2212,7 +2220,12 @@ QString AnanBackend::applyDroopTables(const QMap<int, DroopCorrectionTable>& tab
                     std::vector<float>(it.value().begin(), it.value().end())));
         }
     }
-    return persistDroopTables(tables);
+    const QString failure = persistDroopTables(tables);
+    if (failure.isEmpty()) {
+        for (auto it = tables.constBegin(); it != tables.constEnd(); ++it)
+            m_savedDroopTables.insert(it.key(), it.value());
+    }
+    return failure;
 }
 
 void AnanBackend::invokeExtension(const QString& ns, const QString& verb,
