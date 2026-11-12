@@ -26,9 +26,9 @@ struct SlotDef {
     const char* tip;
 };
 
-// Two rows of five: the blanker and the notch lead their rows, the noise
-// reductions follow in the AetherRX window's own order. The last cell is
-// free (a manual notch belongs there once this radio has one).
+// Two rows of five: the blanker and the automatic notch lead their rows, the
+// noise reductions follow in the AetherRX window's own order, and the manual
+// notches close the second row.
 constexpr SlotDef kSlots[] = {
     {"NB", "Noise blanker on or off, for the active receiver."},
     {"NR2", "NR2 noise reduction on or off. Right-click opens its settings."},
@@ -40,6 +40,9 @@ constexpr SlotDef kSlots[] = {
     {"RN2", "RN2 noise reduction on or off. Right-click opens its settings."},
     {"BNR", "BNR noise reduction on or off. Right-click opens its settings."},
     {"NNR", "NNR noise reduction on or off. Right-click opens its settings."},
+    {"MNF", "Manual notches on or off (all of them at once). Right-click adds a "
+            "notch in the middle of the passband; right-click the spectrum to "
+            "place one on a carrier, and drag it there to move or widen it."},
 };
 
 }  // namespace

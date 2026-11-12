@@ -31,7 +31,7 @@ namespace AetherSDR::anan {
 // uncalibrated raw signal-peak reading (no dBFS-to-dBm calibration yet) out.
 // Runs on AnanBackend's I/O thread; same shape as Hl2RxDsp, scoped to the
 // RX-only path. The WDSP impulse blanker runs ahead of demodulation; manual
-// notches are not implemented.
+// notches are WDSP's notched bandpass (addNotch() and friends).
 // READ docs/HERMES.md §16 (receive handedness) BEFORE TOUCHING processIqBlock().
 // P2 polarity is confirmed by `radiocert rx` (WWV: USB/DIGU recover, LSB/DIGL
 // don't) and independently by SDR++ on an RSP1B. Both demodulator and analyzer
@@ -193,6 +193,21 @@ public:
     void setNr2(bool on, int gainMethod, int npeMethod, bool aeRun);
     // brick3-angelia: WDSP's automatic notch filter (ANF), level 0..100.
     void setAutoNotch(bool on, int level);
+
+    // brick3-angelia: manual notches (Thetis's MNF, the app's TNF): nulls
+    // parked at ABSOLUTE RF frequencies, in WDSP's notched bandpass
+    // (WdspChannel::addNotch()). `index` is the position in a dense list, the
+    // same list AnanBackend keeps by id. This object keeps the list too and
+    // replays it into every channel it installs, so a rate change keeps the
+    // notches; while a rebuild is in flight a change only reaches the list.
+    // setNotchTuneFrequency() takes the DDC's centre and must follow every
+    // retune, or the notches drift off their carriers.
+    Q_INVOKABLE void addNotch(int index, double centerHz, double widthHz, bool active);
+    Q_INVOKABLE void editNotch(int index, double centerHz, double widthHz, bool active);
+    Q_INVOKABLE void removeNotch(int index);
+    Q_INVOKABLE void clearNotches();
+    Q_INVOKABLE void setNotchesEnabled(bool on);
+    Q_INVOKABLE void setNotchTuneFrequency(double tuneHz);
     struct NoiseBlankerState {
         bool hasChain = false;
         WdspChannel::NoiseBlanker kind = WdspChannel::NoiseBlanker::Off;
@@ -450,6 +465,25 @@ private:
     int m_nextViewRateHz = 0;
     PanWindow m_frameWindow;        // the part of the band m_bins covers
     std::vector<float> m_viewBins;  // the trace as the view shows it
+
+    // ---- brick3-angelia: manual notches ----
+    struct Notch {
+        double centerHz = 0.0;
+        double widthHz = 0.0;
+        bool active = true;
+    };
+    std::vector<Notch> m_notches;        // WDSP's order
+    bool m_notchesEnabled = true;
+    double m_notchTuneHz = 0.0;
+    // True when a change may go to the channel now (see the setters' comment).
+    [[nodiscard]] bool canPushToChannel() const noexcept
+    {
+        return m_channel != nullptr && !m_rebuildInFlight;
+    }
+    // WDSP's notch list rebuilt from m_notches, with the tune frequency and
+    // the enable: at every install, and whenever a single change was refused
+    // (so a position can never drift between the two lists).
+    void pushAllNotches(WdspChannel& channel);
 
     // ---- brick3-angelia: the trace's movement in time ----
     // The time average (FFT AVG, log or linear) and the attack/decay run

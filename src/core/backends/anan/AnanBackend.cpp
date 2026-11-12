@@ -332,6 +332,10 @@ AnanBackend::AnanBackend(QObject* parent)
         // widest rate the radio has -- emitPanLimits().
         emitPanLimits();
         pushView();
+        // The notches' frame of reference, then the last session's notches.
+        pushNotchTune();
+        if (!wasRateChange)
+            replayRestoredNotches();
         // The RF Gain slider IS the step attenuator: -31..0 dB in 1 dB steps.
         // Same every linkUp, for the same reason as the limits above.
         emit panRfGainInfoChanged(kPanId, -kMaxStepAttenuationDb, 0, 1);
@@ -555,6 +559,13 @@ RadioCapabilities AnanBackend::capabilities() const
         QStringLiteral("anan"), QStringLiteral("nr2.set")};
     // brick3-angelia: and so is ANF (requestSliceDsp(), Feature::Anf).
     c.hostAutoNotch = RadioCapabilities::HostAutoNotch{};
+    // brick3-angelia: manual notches in WDSP's notched bandpass, as on the
+    // HL2 (createNotch() and friends). A full null, so no depth; the width
+    // floor is the receive filter's at its 2048 taps.
+    c.maxNotchFilters = kMaxNotches;
+    c.notchHasDepth = false;
+    c.notchMinWidthHz = kMinNotchWidthHz;
+    c.notchMaxWidthHz = kMaxNotchWidthHz;
     // brick3-angelia: the operator picks the analyzer's FFT size and window
     // ("anan" "pan.set"). Window names in WDSP's own numbering.
     {
@@ -677,7 +688,9 @@ RadioCapabilities AnanBackend::capabilities() const
                               | RadioCapabilities::ClientSettingsDomain::SpanRate
                               // The operator's filter, live and per mode
                               // ("filters" extension), across restarts.
-                              | RadioCapabilities::ClientSettingsDomain::Passband;
+                              | RadioCapabilities::ClientSettingsDomain::Passband
+                              // The manual notches ("notches" extension).
+                              | RadioCapabilities::ClientSettingsDomain::Notches;
     c.hostDroopCalibration = true; // AnanDroopCorrection.h -- real DDC0 roll-off,
                                     // corrected client-side via AnanDroopCalibrator
     c.extensionNamespaces = {QStringLiteral("anan")};  // "frontend.set", "droop.apply" -- see invokeExtension()
@@ -728,6 +741,22 @@ void AnanBackend::applyRestoredState(const RestoredRadioState& state)
     // radio A's zoom for radio B.
     m_restoredRateKsps = state.sampleRateHz > 0
         ? nearestDdc0RateKsps(state.sampleRateHz / 1000) : 0;
+    // brick3-angelia: the manual notches, unconditional like the rest.
+    m_restoredNotches.clear();
+    for (const QJsonValue& value : state.extension.value(QStringLiteral("notches")).toArray()) {
+        const QJsonObject o = value.toObject();
+        NotchRecord notch;
+        notch.centerHz = o.value(QStringLiteral("centerHz")).toDouble();
+        notch.widthHz = o.value(QStringLiteral("widthHz")).toDouble();
+        notch.active = o.value(QStringLiteral("active")).toBool(true);
+        if (!isRestorableFrequencyHz(notch.centerHz)
+            || !(notch.widthHz > 0.0 && notch.widthHz <= 12'000.0)) {
+            continue;
+        }
+        if (static_cast<int>(m_restoredNotches.size()) >= kMaxNotches)
+            break;
+        m_restoredNotches.push_back(notch);
+    }
     // brick3-angelia: the zoom inside that rate, unconditional like the rest.
     {
         const double span = state.extension.value(QStringLiteral("panView")).toObject()
@@ -782,6 +811,15 @@ RestoredRadioState AnanBackend::currentOperatingState() const
         filters.insert(it.key(), QJsonArray{it.value().first, it.value().second});
     if (!filters.isEmpty())
         state.extension.insert(QStringLiteral("filters"), filters);
+    // brick3-angelia: the manual notches. Until the replay has run, the
+    // remembered ones are still the truth: leaving them out would erase them.
+    QJsonArray notches;
+    for (const NotchRecord& notch : m_notchReplayPending ? m_restoredNotches : m_notches) {
+        notches.append(QJsonObject{{QStringLiteral("centerHz"), notch.centerHz},
+                                   {QStringLiteral("widthHz"), notch.widthHz},
+                                   {QStringLiteral("active"), notch.active}});
+    }
+    state.extension.insert(QStringLiteral("notches"), notches);
     // brick3-angelia: the zoom inside the rate above; 0 = the whole band.
     state.extension.insert(QStringLiteral("panView"), QJsonObject{
         {QStringLiteral("spanHz"), viewSpanHz() < rateHz() ? viewSpanHz() : 0.0}});
@@ -945,6 +983,16 @@ void AnanBackend::connectRadio(const RadioConnectRequest& request)
     // ...and so does the view, at the zoom the last session ended with.
     m_viewCenterHz = m_sliceFreqHz;
     m_viewSpanHz = m_restoredViewSpanHz;
+    // No notches until the link is up: the model above was cleared for this
+    // session, and replayRestoredNotches() reports each one it puts back.
+    m_notches.clear();
+    m_notchesEnabled = true;
+    m_notchReplayPending = !m_restoredNotches.empty();
+    if (m_dsp) {
+        QMetaObject::invokeMethod(m_dsp, "clearNotches", Qt::QueuedConnection);
+        QMetaObject::invokeMethod(m_dsp, "setNotchesEnabled", Qt::QueuedConnection,
+                                  Q_ARG(bool, true));
+    }
 
     m_speakerAudioEnabled = m_pendingParams.speakerAudioEnabled;
     m_pendingDspConfig = AnanRxDsp::Config{};
@@ -1599,6 +1647,127 @@ void AnanBackend::emitPanLimits()
 {
     const double rate = rateHz();
     emit panBandwidthLimitsChanged(kPanId, rate * kMinViewFraction / 1.0e6, rate / 1.0e6);
+}
+
+// ---- brick3-angelia: manual notches (Hl2Backend's, for one receiver) ----
+
+int AnanBackend::notchIndexFor(int notchId) const noexcept
+{
+    for (std::size_t i = 0; i < m_notches.size(); ++i) {
+        if (m_notches[i].id == notchId)
+            return static_cast<int>(i);
+    }
+    return -1;
+}
+
+void AnanBackend::pushNotchTune()
+{
+    if (m_dsp && m_ncoHz > 0.0) {
+        QMetaObject::invokeMethod(m_dsp, "setNotchTuneFrequency", Qt::QueuedConnection,
+                                  Q_ARG(double, m_ncoHz));
+    }
+}
+
+void AnanBackend::replayRestoredNotches()
+{
+    if (!m_notchReplayPending)
+        return;
+    m_notchReplayPending = false;
+    // Through createNotch(), which mints the ids and reports each one: that
+    // is what puts the markers back on the panadapter.
+    const std::vector<NotchRecord> restored = m_restoredNotches;
+    for (const NotchRecord& notch : restored) {
+        const int id = m_nextNotchId;
+        createNotch(notch.centerHz, notch.widthHz);
+        if (!notch.active && m_nextNotchId != id) {
+            AetherSDR::NotchDelta delta;
+            delta.active = false;
+            setNotch(id, delta);
+        }
+    }
+}
+
+void AnanBackend::createNotch(double centerHz, double widthHz)
+{
+    if (!(centerHz > 0.0) || !std::isfinite(centerHz) || !std::isfinite(widthHz))
+        return;
+    if (static_cast<int>(m_notches.size()) >= kMaxNotches)
+        return;
+    NotchRecord notch;
+    notch.id = m_nextNotchId++;
+    notch.centerHz = centerHz;
+    // Clamped to what the receive filter can make, and reported at that
+    // width, so the marker shows the notch that is heard.
+    notch.widthHz = std::clamp(widthHz, kMinNotchWidthHz, kMaxNotchWidthHz);
+    notch.active = true;
+    const int index = static_cast<int>(m_notches.size());   // appended
+    m_notches.push_back(notch);
+    if (m_dsp) {
+        // The frame of reference before every placement: cheap, and a notch
+        // placed against a stale tune frequency is silently off its carrier.
+        pushNotchTune();
+        QMetaObject::invokeMethod(m_dsp, "addNotch", Qt::QueuedConnection,
+                                  Q_ARG(int, index), Q_ARG(double, notch.centerHz),
+                                  Q_ARG(double, notch.widthHz), Q_ARG(bool, notch.active));
+    }
+    AetherSDR::NotchDelta delta;
+    delta.centerHz = notch.centerHz;
+    delta.widthHz = notch.widthHz;
+    delta.active = notch.active;
+    emit notchChanged(notch.id, delta);
+    emit operatingStateChanged();
+}
+
+void AnanBackend::setNotch(int notchId, const AetherSDR::NotchDelta& delta)
+{
+    const int index = notchIndexFor(notchId);
+    if (index < 0)
+        return;
+    NotchRecord& notch = m_notches[static_cast<std::size_t>(index)];
+    // Depth and permanence are Flex's: a WDSP notch is a full null, and there
+    // is nowhere in this radio for one to persist (notchHasDepth is false).
+    if (delta.centerHz && std::isfinite(*delta.centerHz) && *delta.centerHz > 0.0)
+        notch.centerHz = *delta.centerHz;
+    if (delta.widthHz && std::isfinite(*delta.widthHz))
+        notch.widthHz = std::clamp(*delta.widthHz, kMinNotchWidthHz, kMaxNotchWidthHz);
+    if (delta.active)
+        notch.active = *delta.active;
+    if (m_dsp) {
+        QMetaObject::invokeMethod(m_dsp, "editNotch", Qt::QueuedConnection,
+                                  Q_ARG(int, index), Q_ARG(double, notch.centerHz),
+                                  Q_ARG(double, notch.widthHz), Q_ARG(bool, notch.active));
+    }
+    // The APPLIED values, which may differ from the request (the width clamp).
+    AetherSDR::NotchDelta applied;
+    applied.centerHz = notch.centerHz;
+    applied.widthHz = notch.widthHz;
+    applied.active = notch.active;
+    emit notchChanged(notch.id, applied);
+    emit operatingStateChanged();
+}
+
+void AnanBackend::removeNotch(int notchId)
+{
+    const int index = notchIndexFor(notchId);
+    if (index < 0)
+        return;
+    // Erased here and in the DSP by the SAME index: both lists close the gap.
+    m_notches.erase(m_notches.begin() + index);
+    if (m_dsp) {
+        QMetaObject::invokeMethod(m_dsp, "removeNotch", Qt::QueuedConnection,
+                                  Q_ARG(int, index));
+    }
+    emit notchRemoved(notchId);
+    emit operatingStateChanged();
+}
+
+void AnanBackend::setNotchesEnabled(bool on)
+{
+    m_notchesEnabled = on;
+    if (m_dsp) {
+        QMetaObject::invokeMethod(m_dsp, "setNotchesEnabled", Qt::QueuedConnection,
+                                  Q_ARG(bool, on));
+    }
 }
 
 int AnanBackend::sanitizedPanFftSize(int requested) noexcept
@@ -2539,6 +2708,7 @@ void AnanBackend::applyTuneToRadioAndPan()
     // The slice's place inside the span. Sent with the retune so a recentre
     // and its shift reach the radio and the DSP together.
     pushShift();
+    pushNotchTune();
     // The view's place inside the band: it changes with a pan or a zoom, and
     // with a DDC retune under a view that stayed put (brick3-angelia).
     pushView();

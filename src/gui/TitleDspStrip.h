@@ -10,9 +10,10 @@ class QPushButton;
 namespace AetherSDR {
 
 // brick3-angelia: the receive DSP switches beside the title bar's frequency
-// readout, as Thetis keeps its NR / NB / ANF grid beside the VFO: the noise
-// blanker, the automatic notch filter, and the client noise reductions
-// (NR2 NR4 MNR DFNR RN2 BNR NNR), two rows of small toggle buttons.
+// readout, as Thetis keeps its NR / NB / ANF / MNF grid beside the VFO: the
+// noise blanker, the automatic notch filter, the client noise reductions
+// (NR2 NR4 MNR DFNR RN2 BNR NNR) and the manual notches, two rows of small
+// toggle buttons.
 //
 // It owns nothing. A click only emits toggled(id, on); MainWindow switches
 // the real thing -- the active slice's NB and ANF, the audio engine's noise

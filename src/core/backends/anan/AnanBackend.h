@@ -96,6 +96,13 @@ public:
     void setPanCenter(const QString& panId, double hz, PanCenterIntent intent) override;
     void setPanBandwidth(const QString& panId, double hz) override;
     void setPanFrameRate(const QString& panId, int fps) override;
+    // brick3-angelia: manual notches (Thetis's MNF; the app's TNF surfaces),
+    // host-side in WDSP's notched bandpass, as Hl2Backend's. Ids are minted
+    // here and learned from notchChanged().
+    void createNotch(double centerHz, double widthHz) override;
+    void setNotch(int notchId, const AetherSDR::NotchDelta& delta) override;
+    void removeNotch(int notchId) override;
+    void setNotchesEnabled(bool on) override;
     // The G2's receive step attenuator, presented as RF gain: -31..0 dB,
     // where -12 means 12 dB of attenuation. See the definition.
     void setPanRfGain(const QString& panId, int gainDb) override;
@@ -575,6 +582,33 @@ private:
     // brick3-angelia: WDSP's NR2 (EMNR) as the client last asked for it
     // ("anan" "nr2.set"); retained like the blanker. Engaged = on.
     std::optional<WdspChannel::Emnr> m_nr2;
+    // ---- brick3-angelia: manual notches ----
+    // The list, in WDSP's order: position here is the index AnanRxDsp and
+    // WDSP use. Cleared at every connect; the last session's come back
+    // through replayRestoredNotches() once the link is up.
+    struct NotchRecord {
+        int id = 0;
+        double centerHz = 0.0;
+        double widthHz = 0.0;
+        bool active = true;
+    };
+    std::vector<NotchRecord> m_notches;
+    std::vector<NotchRecord> m_restoredNotches;
+    bool m_notchReplayPending = false;
+    int m_nextNotchId = 1;
+    bool m_notchesEnabled = true;
+    // The narrowest notch the receive filter can make at its 2048 taps
+    // (WdspChannel::minimumNotchWidthHz()); narrower requests are widened to
+    // it and reported at that width, so the marker shows what is heard.
+    static constexpr double kMinNotchWidthHz = 200.0;
+    static constexpr double kMaxNotchWidthHz = 6000.0;
+    static constexpr int kMaxNotches = 1024;   // WDSP's notch database (RXA.c)
+    [[nodiscard]] int notchIndexFor(int notchId) const noexcept;
+    // The DDC's centre to the DSP: notch centres are absolute, and WDSP needs
+    // the tuned frequency to place them. After every retune.
+    void pushNotchTune();
+    void replayRestoredNotches();
+
     // brick3-angelia: WDSP's automatic notch filter (ANF) as last asked for
     // through requestSliceDsp(); retained like the blanker.
     bool m_anfOn = false;

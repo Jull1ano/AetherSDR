@@ -5575,6 +5575,9 @@ void MainWindow::buildUI()
                     else
                         s->setAnf(on);
                 }
+            } else if (id == QLatin1String("MNF")) {
+                // All the manual notches at once: the notch model's own switch.
+                m_radioModel.tnfModel().requestGlobalTnfEnabled(on);
             } else {
                 requestClientNr(id, on);
             }
@@ -5584,6 +5587,18 @@ void MainWindow::buildUI()
         });
         // Right-click on a noise reduction: its settings page in AetherRX.
         connect(strip, &TitleDspStrip::settingsRequested, this, [this](const QString& id) {
+            if (id == QLatin1String("MNF")) {
+                // Thetis's +MNF: a new notch, in the middle of the passband
+                // (the dial frequency is the passband's EDGE on a sideband),
+                // to be dragged onto the carrier in the spectrum.
+                if (auto* s = activeSlice()) {
+                    const double offsetMhz = (s->filterLow() + s->filterHigh()) / 2.0 / 1.0e6;
+                    m_radioModel.tnfModel().createTnf(s->frequency() + offsetMhz);
+                    m_radioModel.tnfModel().requestGlobalTnfEnabled(true);
+                }
+                QTimer::singleShot(400, this, [this] { refreshTitleDspStrip(); });
+                return;
+            }
             if (!TitleDspStrip::clientNrIds().contains(id))
                 return;
             if (auto* dlg = ensureAetherRxDialog())
@@ -5605,6 +5620,8 @@ void MainWindow::buildUI()
         // What the radio offers changes with the connection.
         connect(&m_radioModel, &RadioModel::capabilitiesChanged, this,
                 [this](bool, const RadioCapabilities&) { refreshTitleDspStrip(); });
+        connect(&m_radioModel.tnfModel(), &TnfModel::globalEnabledChanged, this,
+                [this](bool) { refreshTitleDspStrip(); });
         // Once the rest of the window exists (the AetherRX selector is asked).
         QTimer::singleShot(0, this, [this] { refreshTitleDspStrip(); });
     }

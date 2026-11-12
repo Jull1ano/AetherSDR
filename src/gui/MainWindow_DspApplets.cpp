@@ -282,6 +282,13 @@ void MainWindow::refreshTitleDspStrip()
                                 : tr("No automatic notch filter on this radio, or no receiver yet."));
     strip->setOn(QStringLiteral("NB"), nbHere && slice->nbOn());
     strip->setOn(QStringLiteral("ANF"), anfHere && slice->anfOn());
+
+    // Manual notches: a radio that can hold any (maxNotchFilters). The switch
+    // is the notch model's global enable.
+    const bool mnfHere = connected && caps.maxNotchFilters > 0;
+    strip->setAvailable(QStringLiteral("MNF"), mnfHere,
+                        mnfHere ? QString() : tr("No manual notches on this radio."));
+    strip->setOn(QStringLiteral("MNF"), mnfHere && m_radioModel.tnfModel().globalEnabled());
 }
 
 void MainWindow::updateAetherDspModePolicy()

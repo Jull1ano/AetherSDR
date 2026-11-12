@@ -125,10 +125,10 @@ AnanRxDsp::RebuildResult AnanRxDsp::buildChannel(const Config& config)
     // Brick3 recording at AGC-T 100 it left speech 2.3 dB under Thetis (p95
     // -9.6 vs -7.3 dBFS, peaks -2.3 vs -0.1); 0 matches Thetis to 0.1 dB.
     wc.agcSlopeDb = 0;
-    // filterTaps left at WdspChannel::Config's own default (2048): this
-    // phase has no manual notch filter, so there is no narrow-notch floor to
-    // widen it for (contrast Hl2RxDsp::kRxFilterTaps, which exists solely
-    // for that reason).
+    // filterTaps left at WdspChannel::Config's own default (2048), which
+    // sets the manual notches' width floor at 200 Hz (AnanBackend's
+    // kMinNotchWidthHz). Hl2RxDsp lengthens its filter for a 50 Hz floor;
+    // nothing here does yet.
 
     auto channel = WdspChannel::create(wc, &result.error);
     if (!channel)
@@ -172,8 +172,14 @@ bool AnanRxDsp::installRebuiltChannel(RebuildResult result)
     m_rebuildInFlight = false;
     // buildChannel() never returns one without the other; refuse a result
     // that does rather than install a channel with no spectrum stage.
-    if (!result.channel || !result.analyzer)
+    if (!result.channel || !result.analyzer) {
+        // The build failed and the old channel carries on. Notch and tune
+        // changes made while it ran only reached the list (canPushToChannel()
+        // was false): give them to the channel that is still playing.
+        if (m_channel)
+            pushAllNotches(*m_channel);
         return false;
+    }
     installChannel(std::move(result));
     return true;
 }
@@ -253,6 +259,8 @@ void AnanRxDsp::installChannel(RebuildResult result)
         && !result.channel->setEmnr(m_config.emnr)) {
         qCWarning(lcAnanRxDsp) << "NR2 (EMNR) refused by the rebuilt channel";
     }
+    // The manual notches: a new channel's list is empty.
+    pushAllNotches(*result.channel);
     if ((result.channel->config().autoNotch != m_config.autoNotch
          || result.channel->config().autoNotchLevel != m_config.autoNotchLevel)
         && !result.channel->setAutoNotch(m_config.autoNotch, m_config.autoNotchLevel)) {
@@ -392,6 +400,92 @@ void AnanRxDsp::setAutoNotch(bool on, int level)
     if (!m_channel->setAutoNotch(m_config.autoNotch, m_config.autoNotchLevel)) {
         qCWarning(lcAnanRxDsp) << "ANF" << (on ? "on" : "off") << "refused by the channel";
     }
+}
+
+void AnanRxDsp::pushAllNotches(WdspChannel& channel)
+{
+    // Tune frequency first: the centres are absolute, so a notch placed
+    // against a stale one lands off its carrier.
+    channel.setNotchTuneFrequency(m_notchTuneHz);
+    for (int index = channel.notchCount() - 1; index >= 0; --index)
+        channel.removeNotch(index);
+    const double floorHz = channel.minimumNotchWidthHz();
+    int index = 0;
+    for (const Notch& notch : m_notches) {
+        // A refused entry would put every later position out of step, so it
+        // is added INACTIVE at a width WDSP takes rather than left out.
+        if (!channel.addNotch(index, notch.centerHz, std::max(notch.widthHz, floorHz),
+                              notch.active)) {
+            qCWarning(lcAnanRxDsp) << "notch" << index << "at" << notch.centerHz
+                                   << "Hz refused by the channel";
+            if (!channel.addNotch(index, notch.centerHz, std::max(floorHz, 200.0), false))
+                break;   // the lists differ from here on; nothing more to do safely
+        }
+        ++index;
+    }
+    channel.setNotchesEnabled(m_notchesEnabled && !m_notches.empty());
+}
+
+void AnanRxDsp::addNotch(int index, double centerHz, double widthHz, bool active)
+{
+    if (index < 0 || index > static_cast<int>(m_notches.size())
+        || !std::isfinite(centerHz) || !std::isfinite(widthHz) || widthHz <= 0.0) {
+        return;
+    }
+    m_notches.insert(m_notches.begin() + index, Notch{centerHz, widthHz, active});
+    if (canPushToChannel())
+        pushAllNotches(*m_channel);
+}
+
+void AnanRxDsp::editNotch(int index, double centerHz, double widthHz, bool active)
+{
+    if (index < 0 || index >= static_cast<int>(m_notches.size())
+        || !std::isfinite(centerHz) || !std::isfinite(widthHz) || widthHz <= 0.0) {
+        return;
+    }
+    m_notches[static_cast<std::size_t>(index)] = Notch{centerHz, widthHz, active};
+    if (!canPushToChannel())
+        return;
+    // A drag sends these many times a second: one edit, not a rebuild of the
+    // list -- unless WDSP refuses it, and then the list is put right.
+    if (!m_channel->editNotch(index, centerHz,
+                              std::max(widthHz, m_channel->minimumNotchWidthHz()), active)) {
+        pushAllNotches(*m_channel);
+    }
+}
+
+void AnanRxDsp::removeNotch(int index)
+{
+    if (index < 0 || index >= static_cast<int>(m_notches.size()))
+        return;
+    m_notches.erase(m_notches.begin() + index);
+    if (canPushToChannel())
+        pushAllNotches(*m_channel);
+}
+
+void AnanRxDsp::clearNotches()
+{
+    m_notches.clear();
+    if (canPushToChannel())
+        pushAllNotches(*m_channel);
+}
+
+void AnanRxDsp::setNotchesEnabled(bool on)
+{
+    m_notchesEnabled = on;
+    if (canPushToChannel())
+        m_channel->setNotchesEnabled(on && !m_notches.empty());
+}
+
+void AnanRxDsp::setNotchTuneFrequency(double tuneHz)
+{
+    if (!std::isfinite(tuneHz) || tuneHz == m_notchTuneHz)
+        return;
+    m_notchTuneHz = tuneHz;
+    // Nothing to keep on its carrier while there are no notches; the next
+    // pushAllNotches() sends the frequency with them.
+    if (canPushToChannel() && !m_notches.empty())
+        m_channel->setNotchTuneFrequency(tuneHz);
 }
 
 void AnanRxDsp::publishNoiseBlankerState()
