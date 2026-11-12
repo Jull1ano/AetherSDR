@@ -596,6 +596,7 @@ RadioCapabilities AnanBackend::capabilities() const
         analyzer.sampleRateHz = m_pendingParams.rx1RateKsps * 1000;
         analyzer.attackMs = m_panAttackMs;
         analyzer.decayMs = m_panDecayMs;
+        analyzer.flattenPct = m_panFlattenPct;
         analyzer.weightedAverageLabel = QStringLiteral("Log Avg");
         c.hostPanAnalyzer = analyzer;
     }
@@ -964,6 +965,9 @@ void AnanBackend::connectRadio(const RadioConnectRequest& request)
         request.params.value(QStringLiteral("anan.panAttackMs"), 0).toInt(), 0, 5000);
     m_panDecayMs = std::clamp(
         request.params.value(QStringLiteral("anan.panDecayMs"), 0).toInt(), 0, 5000);
+    // ...and Flatten, 0 (none) for a connect that never populated it.
+    m_panFlattenPct = std::clamp(
+        request.params.value(QStringLiteral("anan.panFlattenPct"), 0).toInt(), 0, 90);
     // applyRestoredState() seeds both ADC values before this connect.
     m_attenuationDb = m_pendingParams.rx1AdcIndex == 1
         ? m_pendingParams.adc1AttenuationDb
@@ -1027,6 +1031,7 @@ void AnanBackend::connectRadio(const RadioConnectRequest& request)
     m_pendingDspConfig.panWindow = m_panWindow;
     m_pendingDspConfig.spectrumAttackMs = m_panAttackMs;
     m_pendingDspConfig.spectrumDecayMs = m_panDecayMs;
+    m_pendingDspConfig.spectrumFlattenPct = m_panFlattenPct;
     // The view, so the session's first analyzer is aimed at it. Written
     // straight into the config: the DSP may still hold the last session's
     // analyzer, which a queued setPanView() would re-aim for nothing.
@@ -2323,6 +2328,17 @@ void AnanBackend::invokeExtension(const QString& ns, const QString& verb,
             if (m_dsp) {
                 QMetaObject::invokeMethod(m_dsp, "setSpectrumBallistics", Qt::QueuedConnection,
                                           Q_ARG(int, m_panAttackMs), Q_ARG(int, m_panDecayMs));
+            }
+        }
+        if (fields.contains(QStringLiteral("flattenPct"))) {
+            // Flatten, live: drawing only, nothing to rebuild.
+            m_panFlattenPct = std::clamp(
+                fields.value(QStringLiteral("flattenPct")).toInt(), 0, 90);
+            AnanSettings::setPanFlattenPct(m_panFlattenPct);
+            m_pendingDspConfig.spectrumFlattenPct = m_panFlattenPct;
+            if (m_dsp) {
+                QMetaObject::invokeMethod(m_dsp, "setSpectrumFlatten", Qt::QueuedConnection,
+                                          Q_ARG(int, m_panFlattenPct));
             }
         }
         if (requestId != 0) {

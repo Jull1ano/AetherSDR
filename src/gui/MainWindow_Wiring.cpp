@@ -3483,8 +3483,10 @@ void MainWindow::wirePanDisplayStatus(PanadapterApplet* applet,
                                          analyzer->windows, analyzer->window);
             menu->setWeightedAverageLabel(analyzer->weightedAverageLabel);
             menu->setHostBallistics(analyzer->attackMs, analyzer->decayMs);
+            menu->setHostFlatten(analyzer->flattenPct);
         } else {
             menu->setHostBallistics(-1, -1);
+            menu->setHostFlatten(-1);
             menu->setSampleRateChoices({}, 0);
             menu->setHostAnalyzerChoices({}, 0, {}, 0);
             menu->setWeightedAverageLabel({});
@@ -5020,6 +5022,7 @@ void MainWindow::wirePanadapter(PanadapterApplet* applet)
     disconnect(menu, &SpectrumOverlayMenu::hostFftWindowChanged, this, nullptr);
     disconnect(menu, &SpectrumOverlayMenu::hostAttackChanged, this, nullptr);
     disconnect(menu, &SpectrumOverlayMenu::hostDecayChanged, this, nullptr);
+    disconnect(menu, &SpectrumOverlayMenu::hostFlattenChanged, this, nullptr);
     auto sendHostAnalyzer = [this](const QString& field, int value) {
         const RadioCapabilities caps = m_radioModel.backendCapabilities();
         if (!m_radioModel.isConnected() || !caps.hostPanAnalyzer)
@@ -5041,6 +5044,10 @@ void MainWindow::wirePanadapter(PanadapterApplet* applet)
     connect(menu, &SpectrumOverlayMenu::hostDecayChanged,
             this, [sendHostAnalyzer](int ms) {
         sendHostAnalyzer(QStringLiteral("decayMs"), ms);
+    });
+    connect(menu, &SpectrumOverlayMenu::hostFlattenChanged,
+            this, [sendHostAnalyzer](int pct) {
+        sendHostAnalyzer(QStringLiteral("flattenPct"), pct);
     });
     connect(menu, &SpectrumOverlayMenu::hostFftWindowChanged,
             this, [sendHostAnalyzer](int window) {

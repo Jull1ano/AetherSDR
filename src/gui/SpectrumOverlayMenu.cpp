@@ -2098,6 +2098,34 @@ void SpectrumOverlayMenu::buildDisplayPanel()
         w->hide();
     }
 
+    // brick3-angelia: Flatten -- the noise floor's grass drawn shorter, point
+    // by point, with nothing smoothed across frequency (unlike FFT Smooth), so
+    // a carrier stays as narrow as it is. Hidden until MainWindow says the
+    // analyzer has it (setHostFlatten).
+    makeRow(tr("Flatten:"), 0, 90 / kFlattenStepPct, 0, m_flattenSlider, m_flattenLabel,
+            &m_flattenTitle);
+    m_flattenSlider->setObjectName("displayFlattenSlider");
+    m_flattenSlider->setPageStep(2);   // 10 % per page / groove click
+    m_flattenSlider->setAccessibleName(tr("Spectrum noise flatten"));
+    m_flattenSlider->setToolTip(
+        tr("Makes the noise floor's grass shorter: 50 % draws it half as tall.\n"
+           "Nothing is smoothed across frequency, so signals stay as narrow as\n"
+           "they are and strong ones keep their true level. A weak signal inside\n"
+           "the grass is drawn lower along with it. The waterfall is drawn from\n"
+           "the same trace, so its background calms too. The S-meter and the\n"
+           "audio are not affected."));
+    m_flattenSlider->setAccessibleDescription(
+        tr("How much of the noise floor's grass is drawn away, in percent. Zero is off."));
+    m_flattenLabel->setText(flattenText(0));
+    connect(m_flattenSlider, &QSlider::valueChanged, this, [this](int v) {
+        m_flattenLabel->setText(flattenText(v));
+        emit hostFlattenChanged(v * kFlattenStepPct);
+    });
+    for (QWidget* w : {static_cast<QWidget*>(m_flattenTitle), static_cast<QWidget*>(m_flattenSlider),
+                       static_cast<QWidget*>(m_flattenLabel)}) {
+        w->hide();
+    }
+
     // Smooth — display-only smoothing across frequency, in linear power (the
     // panadapter's counterpart of the AetherRX/TX EQ's Smoothing). The value
     // is a Gaussian width in tenths of a pixel; the client applies it to every
@@ -2874,6 +2902,27 @@ void SpectrumOverlayMenu::setHostBallistics(int attackMs, int decayMs)
     m_decaySlider->setValue(decayMs / kBallisticsStepMs);
     m_attackLabel->setText(ballisticsText(m_attackSlider->value()));
     m_decayLabel->setText(ballisticsText(m_decaySlider->value()));
+}
+
+QString SpectrumOverlayMenu::flattenText(int steps)
+{
+    return steps <= 0 ? tr("Off") : tr("%1 %").arg(steps * kFlattenStepPct);
+}
+
+void SpectrumOverlayMenu::setHostFlatten(int pct)
+{
+    if (!m_flattenSlider)
+        return;
+    const bool offered = pct >= 0;
+    for (QWidget* w : {static_cast<QWidget*>(m_flattenTitle), static_cast<QWidget*>(m_flattenSlider),
+                       static_cast<QWidget*>(m_flattenLabel)}) {
+        w->setVisible(offered);
+    }
+    if (!offered)
+        return;
+    const QSignalBlocker block(m_flattenSlider);
+    m_flattenSlider->setValue((pct + kFlattenStepPct / 2) / kFlattenStepPct);
+    m_flattenLabel->setText(flattenText(m_flattenSlider->value()));
 }
 
 QString SpectrumOverlayMenu::averageText(int steps) const

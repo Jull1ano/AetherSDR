@@ -762,6 +762,8 @@ static void populateFamilyParams(RadioConnectRequest& req, const QString& family
                           anan::AnanSettings::panAttackMs());
         req.params.insert(QStringLiteral("anan.panDecayMs"),
                           anan::AnanSettings::panDecayMs());
+        req.params.insert(QStringLiteral("anan.panFlattenPct"),
+                          anan::AnanSettings::panFlattenPct());
         return;
     }
 

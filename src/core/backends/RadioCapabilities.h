@@ -891,6 +891,11 @@ struct RadioCapabilities {
         // Negative: the analyzer has no such control and none is offered.
         int attackMs = -1;
         int decayMs = -1;
+        // How much of the noise floor's grass is drawn away, percent (0 =
+        // none, 50 = half as tall), point by point with nothing smoothed
+        // across frequency. Sent as {flattenPct} through the same verb.
+        // Negative: not offered.
+        int flattenPct = -1;
         // What the weighted-average toggle selects on this analyzer, as a
         // short button label. Empty keeps the display's own wording.
         QString weightedAverageLabel;

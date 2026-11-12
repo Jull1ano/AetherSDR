@@ -89,6 +89,10 @@ public:
         // setSpectrumBallistics().
         int spectrumAttackMs = 0;
         int spectrumDecayMs = 0;
+        // brick3-angelia: Flatten, percent of the noise floor's grass drawn
+        // away at publish (anan::flattenNoiseFloor()); 0 = none. Kept
+        // current by setSpectrumFlatten().
+        int spectrumFlattenPct = 0;
         // brick3-angelia: WDSP's automatic notch filter, kept current by
         // setAutoNotch(). In Config for the same reason as the blanker.
         bool autoNotch = false;
@@ -254,6 +258,8 @@ public:
     Q_INVOKABLE void setPanFftSize(int fftSize);
     // brick3-angelia: the trace's attack and decay, ms; 0 = none.
     Q_INVOKABLE void setSpectrumBallistics(int attackMs, int decayMs);
+    // brick3-angelia: Flatten, percent (0..90); drawing only.
+    Q_INVOKABLE void setSpectrumFlatten(int pct);
     // brick3-angelia: the part of the sampled band to show (Config::
     // panViewLow/High). Takes effect at once -- the frame in hand is re-read
     // onto the new view and published -- and the analyzer is re-aimed once
@@ -503,6 +509,10 @@ private:
     std::vector<float> m_carry;     // scratch for carryOntoFrameGrid()
     PanWindow m_traceWindow;        // the part of the band m_trace covers
     bool m_traceValid = false;      // m_trace holds something to publish
+    // Flatten works on a copy of what is published, never on m_trace or
+    // m_average: the smoothing state stays the measurement.
+    std::vector<float> m_publishBins;
+    FlattenState m_flatten;
     QElapsedTimer m_frameClock;     // time between analyzer frames
 
     // Live droop-correction tables, keyed by DDC0 rate in ksps -- see

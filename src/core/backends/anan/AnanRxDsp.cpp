@@ -621,13 +621,24 @@ void AnanRxDsp::publishSpectrum()
     const bool isView = m_trace.size() == static_cast<std::size_t>(m_config.panPoints)
         && std::abs(m_traceWindow.low - m_config.panViewLow) < 1e-9
         && std::abs(m_traceWindow.high - m_config.panViewHigh) < 1e-9;
+    // Flatten (drawing only) is off while the droop sweep measures: it needs
+    // the floor exactly as received.
+    const bool flatten = m_config.spectrumFlattenPct > 0 && !m_droopBypassed;
     if (isView) {
-        emit spectrumReady(m_trace);
+        if (!flatten) {
+            emit spectrumReady(m_trace);
+            return;
+        }
+        m_publishBins = m_trace;
+        flattenNoiseFloor(m_publishBins, m_config.spectrumFlattenPct / 100.0f, m_flatten);
+        emit spectrumReady(m_publishBins);
         return;
     }
     resamplePanWindow(m_trace, m_traceWindow.low, m_traceWindow.high,
                       m_config.panViewLow, m_config.panViewHigh,
                       static_cast<std::size_t>(std::max(2, m_config.panPoints)), m_viewBins);
+    if (flatten)
+        flattenNoiseFloor(m_viewBins, m_config.spectrumFlattenPct / 100.0f, m_flatten);
     emit spectrumReady(m_viewBins);
 }
 
@@ -685,6 +696,12 @@ void AnanRxDsp::setSpectrumBallistics(int attackMs, int decayMs)
 {
     m_config.spectrumAttackMs = std::max(0, attackMs);
     m_config.spectrumDecayMs = std::max(0, decayMs);
+}
+
+void AnanRxDsp::setSpectrumFlatten(int pct)
+{
+    // Read at the next publish.
+    m_config.spectrumFlattenPct = std::clamp(pct, 0, 90);
 }
 
 void AnanRxDsp::setPanFftSize(int fftSize)

@@ -622,6 +622,7 @@ private:
     // them: loaded at connect, moved by "pan.set", applied live.
     int m_panAttackMs = 0;
     int m_panDecayMs = 0;
+    int m_panFlattenPct = 0;   // brick3-angelia: Flatten, % (AnanPanView.h)
 
     // The receiver audio stage as last set; emitSliceState() publishes these.
     // Retained across rate changes and reconnects (like the blanker and AGC).

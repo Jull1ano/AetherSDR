@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <vector>
 
 namespace AetherSDR::anan {
@@ -175,6 +176,139 @@ inline void followWithBallistics(std::vector<float>& trace, const std::vector<fl
     for (std::size_t i = 0; i < n; ++i) {
         const float d = target[i] - trace[i];
         trace[i] += (d > 0.0f ? attackAlpha : decayAlpha) * d;
+    }
+}
+
+// brick3-angelia: Flatten -- the noise floor's "grass" drawn shorter, with
+// nothing smoothed across frequency.
+//
+// How tall the grass is, is physics: every point is a power estimate over the
+// time and the bandwidth behind it, and only more of either -- a slower trace
+// or a coarser one -- makes it truly steadier. This does neither. It finds the
+// floor under the trace (the lower quartile over a few blocks of the width,
+// so a signal does not lift it, raised by the noise's own spread to where the
+// noise's middle sits) and draws every point within a few noise widths of
+// that floor closer to it by `amount`, point by point. A point keeps its
+// frequency, so a carrier is exactly as narrow as before, and the mapping is
+// monotonic, so no peak appears or disappears. From about 7.5 noise widths
+// away it is the identity: a signal reads its true level. A weak signal, a
+// few widths up, is drawn lower along with the noise around it.
+//
+// Drawing only: the S-meter, the audio and the droop sweep never see it.
+struct FlattenState {
+    float sigmaDb = 0.0f;              // the noise's spread, followed over frames
+    std::vector<float> scratch;
+    std::vector<float> blockFloor;
+    std::vector<float> blockSpread;
+};
+
+inline float flattenSmoothStep(float t) noexcept
+{
+    t = std::clamp(t, 0.0f, 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
+
+// `amount` 0..0.95: the share of the grass taken away (0.5 halves it).
+inline void flattenNoiseFloor(std::vector<float>& points, float amount, FlattenState& state)
+{
+    const std::size_t n = points.size();
+    amount = std::clamp(amount, 0.0f, 0.95f);
+    if (n < 32 || !(amount > 0.0f))
+        return;
+
+    // Blocks of about 1/48 of the width; each block's floor is read over it
+    // and two blocks either side, wide enough that a broadcast station fills
+    // no more than half of it on a zoomed-out view.
+    constexpr std::size_t kBlocks = 48;
+    constexpr float kQuartileToSigma = 0.6745f;   // Gaussian: median - q25
+    const std::size_t block = std::max<std::size_t>(4, n / kBlocks);
+    const std::size_t nb = (n + block - 1) / block;
+    state.blockFloor.assign(nb, std::numeric_limits<float>::quiet_NaN());
+    state.blockSpread.assign(nb, std::numeric_limits<float>::quiet_NaN());
+    for (std::size_t k = 0; k < nb; ++k) {
+        const std::size_t lo = k >= 2 ? (k - 2) * block : 0;
+        const std::size_t hi = std::min(n, (k + 3) * block);
+        state.scratch.clear();
+        for (std::size_t i = lo; i < hi; ++i) {
+            if (std::isfinite(points[i]))
+                state.scratch.push_back(points[i]);
+        }
+        const std::size_t m = state.scratch.size();
+        if (m < 8)
+            continue;
+        const auto first = state.scratch.begin();
+        const std::size_t i50 = m / 2;
+        const std::size_t i25 = m / 4;
+        std::nth_element(first, first + static_cast<std::ptrdiff_t>(i50), state.scratch.end());
+        const float q50 = state.scratch[i50];
+        std::nth_element(first, first + static_cast<std::ptrdiff_t>(i25),
+                         first + static_cast<std::ptrdiff_t>(i50));
+        const float q25 = state.scratch[i25];
+        state.blockFloor[k] = q25;
+        state.blockSpread[k] = (q50 - q25) / kQuartileToSigma;
+    }
+
+    // The noise's spread: the median over the blocks, so the blocks a signal
+    // fills (whose spread is the signal's) do not count. Followed over frames
+    // so the strength of the effect does not flicker.
+    state.scratch.clear();
+    for (const float v : state.blockSpread) {
+        if (std::isfinite(v))
+            state.scratch.push_back(v);
+    }
+    if (state.scratch.empty())
+        return;
+    const std::size_t mid = state.scratch.size() / 2;
+    std::nth_element(state.scratch.begin(),
+                     state.scratch.begin() + static_cast<std::ptrdiff_t>(mid),
+                     state.scratch.end());
+    const float frameSigma = std::clamp(state.scratch[mid], 0.05f, 20.0f);
+    state.sigmaDb = state.sigmaDb > 0.0f
+        ? state.sigmaDb + 0.1f * (frameSigma - state.sigmaDb)
+        : frameSigma;
+    const float sigma = state.sigmaDb;
+
+    // A block with too few readable points borrows its neighbour's floor.
+    float last = std::numeric_limits<float>::quiet_NaN();
+    for (float& f : state.blockFloor) {
+        if (std::isfinite(f))
+            last = f;
+        else
+            f = last;
+    }
+    last = std::numeric_limits<float>::quiet_NaN();
+    for (auto it = state.blockFloor.rbegin(); it != state.blockFloor.rend(); ++it) {
+        if (std::isfinite(*it))
+            last = *it;
+        else
+            *it = last;
+    }
+    for (float& f : state.blockFloor)
+        f += kQuartileToSigma * sigma;   // lower quartile -> the noise's middle
+
+    const float keep = 1.0f - amount;
+    const float knee = std::max(0.5f, 2.5f * sigma);         // fully flattened inside
+    const float full = std::max(knee + 1.0f, 3.0f * knee);   // untouched beyond
+    const float blockF = static_cast<float>(block);
+    for (std::size_t i = 0; i < n; ++i) {
+        // The floor here, between the two nearest block centres.
+        const float pos = (static_cast<float>(i) + 0.5f) / blockF - 0.5f;
+        std::size_t k0 = 0;
+        float t = 0.0f;
+        if (pos > 0.0f) {
+            k0 = std::min(nb - 1, static_cast<std::size_t>(pos));
+            t = std::clamp(pos - static_cast<float>(k0), 0.0f, 1.0f);
+        }
+        const std::size_t k1 = std::min(nb - 1, k0 + 1);
+        const float floorDb = state.blockFloor[k0] + t * (state.blockFloor[k1] - state.blockFloor[k0]);
+        const float d = points[i] - floorDb;
+        if (!std::isfinite(d))
+            continue;
+        const float ad = std::abs(d);
+        if (ad >= full)
+            continue;
+        const float share = keep + (1.0f - keep) * flattenSmoothStep((ad - knee) / (full - knee));
+        points[i] = floorDb + d * share;
     }
 }
 

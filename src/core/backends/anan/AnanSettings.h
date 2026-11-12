@@ -90,6 +90,10 @@ public:
     static void setPanAttackMs(int ms);
     static int panDecayMs();
     static void setPanDecayMs(int ms);
+    // brick3-angelia: Flatten, percent of the noise floor's grass drawn away
+    // (0 = none, 50 = half as tall; at most 90). Default 50. Same life cycle.
+    static int panFlattenPct();
+    static void setPanFlattenPct(int pct);
 
     // The DDC0 rates a session may start at, for a UI offering the choice.
     //

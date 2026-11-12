@@ -6,6 +6,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 
+#include <algorithm>
 #include <iterator>
 
 namespace AetherSDR::anan {
@@ -37,6 +38,9 @@ constexpr const char* kFieldPanDecayMs        = "panDecayMs";         // brick3-
 constexpr int kDefaultPanAttackMs = 70;
 constexpr int kDefaultPanDecayMs = 260;
 constexpr int kMaxPanBallisticsMs = 5000;
+constexpr const char* kFieldPanFlattenPct     = "panFlattenPct";      // brick3-angelia
+constexpr int kDefaultPanFlattenPct = 50;
+constexpr int kMaxPanFlattenPct = 90;
 
 }  // namespace
 
@@ -250,6 +254,19 @@ void AnanSettings::setPanDecayMs(int ms)
 {
     QJsonObject obj = readObj();
     obj[QLatin1String(kFieldPanDecayMs)] = (ms >= 0 && ms <= kMaxPanBallisticsMs) ? ms : 0;
+    writeObj(obj);
+}
+
+int AnanSettings::panFlattenPct()
+{
+    const int v = readObj().value(QLatin1String(kFieldPanFlattenPct)).toInt(kDefaultPanFlattenPct);
+    return (v >= 0 && v <= kMaxPanFlattenPct) ? v : kDefaultPanFlattenPct;
+}
+
+void AnanSettings::setPanFlattenPct(int pct)
+{
+    QJsonObject obj = readObj();
+    obj[QLatin1String(kFieldPanFlattenPct)] = std::clamp(pct, 0, kMaxPanFlattenPct);
     writeObj(obj);
 }
 

@@ -187,6 +187,9 @@ public:
     // The trace's attack and decay in ms (0 = off), for an analyzer that has
     // them; a negative value hides the two rows.
     void setHostBallistics(int attackMs, int decayMs);
+    // brick3-angelia: Flatten in percent (0 = off) for an analyzer that has
+    // it; a negative value hides the row.
+    void setHostFlatten(int pct);
     // The weighted-average toggle's label on this radio; empty restores
     // "Wt Avg".
     void setWeightedAverageLabel(const QString& label);
@@ -274,6 +277,7 @@ signals:
     void hostFftWindowChanged(int window);  // index into the offered windows
     void hostAttackChanged(int ms);         // 0 = off
     void hostDecayChanged(int ms);          // 0 = off
+    void hostFlattenChanged(int pct);       // 0 = off
     void fftFpsChanged(int fps);
     void fftWeightedAverageChanged(bool on);
     void fftFillAlphaChanged(float alpha);
@@ -532,6 +536,12 @@ private:
     QLabel*      m_decayTitle{nullptr};
     QSlider*     m_decaySlider{nullptr};
     QLabel*      m_decayLabel{nullptr};
+    // Flatten row (5 % steps).
+    static constexpr int kFlattenStepPct = 5;
+    static QString flattenText(int steps);
+    QLabel*      m_flattenTitle{nullptr};
+    QSlider*     m_flattenSlider{nullptr};
+    QLabel*      m_flattenLabel{nullptr};
     QSlider*     m_fpsSlider{nullptr};
     QLabel*      m_fpsLabel{nullptr};
     QSlider*     m_smoothSlider{nullptr};
