@@ -281,6 +281,42 @@ int main(int argc, char** argv)
               "NB off stored, level clamped to 0");
     }
 
+    // ---- squelch (brick3-angelia): stored, published, restored ----
+    // The SQL button and slider were wired to nothing: the backend inherited
+    // IRadioBackend's refusing requestSliceSquelch().
+    {
+        AnanBackend backend;
+        std::optional<SliceDelta> last;
+        QObject::connect(&backend, &IRadioBackend::sliceChanged,
+                         [&last](int, const SliceDelta& d) { last = d; });
+        check(!backend.squelchOnForTest() && backend.squelchLevelForTest() == 20,
+              "squelch defaults: off, level 20 (SliceModel's)");
+        SliceSquelchRequest request;
+        request.enabled = true;
+        request.level = 45;
+        check(backend.requestSliceSquelch(0, request) == ReceiveDispatch::Dispatched,
+              "a manual squelch request is dispatched");
+        check(backend.squelchOnForTest() && backend.squelchLevelForTest() == 45,
+              "and stored");
+        check(last.has_value() && last->squelchOn.value_or(false)
+                  && last->squelchLevel.value_or(-1) == 45,
+              "and published, so the SQL button and slider show what runs");
+        check(backend.liveRxConfigForTest().squelchEnabled
+                  && backend.liveRxConfigForTest().squelchLevel == 45,
+              "and written into the DSP config a connect or rate change builds from");
+        request.kind = SliceSquelchRequest::Kind::Automatic;
+        check(backend.requestSliceSquelch(0, request) == ReceiveDispatch::Unsupported,
+              "engine Auto is not offered");
+        check(backend.squelchOnForTest() && backend.squelchLevelForTest() == 45,
+              "and a refused request changes nothing");
+
+        // Saved with the operating state and restored by a fresh backend.
+        AnanBackend restarted;
+        restarted.applyRestoredState(backend.currentOperatingState());
+        check(restarted.squelchOnForTest() && restarted.squelchLevelForTest() == 45,
+              "the squelch survives a restart");
+    }
+
     // ---- setSliceMode: passband reset only on an ACTUAL mode change ----
     {
         AnanBackend backend;

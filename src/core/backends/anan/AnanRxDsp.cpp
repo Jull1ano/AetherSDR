@@ -110,6 +110,9 @@ AnanRxDsp::RebuildResult AnanRxDsp::buildChannel(const Config& config)
     wc.emnr = config.emnr;
     wc.autoNotch = config.autoNotch;
     wc.autoNotchLevel = config.autoNotchLevel;
+    wc.squelchEnabled = config.squelchEnabled;
+    wc.squelchLevel = config.squelchLevel;
+    wc.levelSquelchOffsetDb = config.squelchLevelOffsetDb;
     // Unity, as Hl2RxDsp::kRxPanelGain: WDSP's RXA panel defaults to x4
     // (RXA.c create_panel, gain1 4.0), +12 dB past the AGC's own level. Left
     // at that default, band noise alone peaked at +8 dBFS on a Brick3 and
@@ -244,6 +247,12 @@ void AnanRxDsp::installChannel(RebuildResult result)
     result.channel->setFilter(m_config.filterLowHz, m_config.filterHighHz);
     result.channel->setAgcFixedGain(m_config.agcFixedGainDb);
     result.channel->setAgc(m_config.agcMode, m_config.maximumAgcGainDb);
+    // The squelch, after setMode() above so the channel routes it to the
+    // stage that mode uses. The operator may have moved it while the build
+    // ran; a refusal is retried from processIqBlock().
+    m_squelchPending = !result.channel->setSquelch(m_config.squelchEnabled,
+                                                   m_config.squelchLevel,
+                                                   m_config.squelchLevelOffsetDb);
     // A rebuild creates a fresh channel; restore the operator's current
     // slice offset rather than silently snapping the slice to centre.
     if (m_shiftHz != 0.0)
@@ -400,6 +409,33 @@ void AnanRxDsp::setAutoNotch(bool on, int level)
     if (!m_channel->setAutoNotch(m_config.autoNotch, m_config.autoNotchLevel)) {
         qCWarning(lcAnanRxDsp) << "ANF" << (on ? "on" : "off") << "refused by the channel";
     }
+}
+
+void AnanRxDsp::setSquelch(bool on, int level, double levelOffsetDb)
+{
+    m_config.squelchEnabled = on;
+    m_config.squelchLevel = std::clamp(level, 0, 100);
+    // WdspChannel refuses a non-finite offset; keep the last good one so the
+    // on/off and the level still land.
+    if (std::isfinite(levelOffsetDb))
+        m_config.squelchLevelOffsetDb = levelOffsetDb;
+    if (canPushToChannel())
+        pushSquelchToChannel();
+}
+
+void AnanRxDsp::pushSquelchToChannel()
+{
+    const bool applied = m_channel->setSquelch(m_config.squelchEnabled,
+                                               m_config.squelchLevel,
+                                               m_config.squelchLevelOffsetDb);
+    // Refused only while another control call is in flight. Said once, not
+    // once per retried block.
+    if (!applied && !m_squelchPending) {
+        qCWarning(lcAnanRxDsp) << "squelch" << (m_config.squelchEnabled ? "on" : "off")
+                               << "level" << m_config.squelchLevel
+                               << "refused by the channel; retrying";
+    }
+    m_squelchPending = !applied;
 }
 
 void AnanRxDsp::pushAllNotches(WdspChannel& channel)
@@ -802,6 +838,11 @@ void AnanRxDsp::processIqBlock(const std::vector<std::complex<float>>& iq)
 {
     if (!m_channel)
         return;
+
+    // A squelch change the channel refused: this is the thread that calls
+    // processIq(), so nothing of ours is in flight here (as Hl2RxDsp).
+    if (m_squelchPending && canPushToChannel())
+        pushSquelchToChannel();
 
     // Handedness: read docs/HERMES.md §16 before touching this. WDSP's RXA as
     // configured here selects the opposite sign to its passband bounds, and the HPSDR

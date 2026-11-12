@@ -70,6 +70,15 @@ public:
                               int level, AetherSDR::NoiseBlankerFill fill) override;
     ReceiveDispatch requestSliceDsp(int sliceId, const SliceDspRequest& request) override;
     ReceiveDispatch requestSliceAudio(int sliceId, const SliceAudioRequest& request) override;
+    // brick3-angelia: receive squelch, host-side in WDSP as Hl2Backend's
+    // (WdspChannel::setSquelch()): FM's noise squelch, a level squelch in
+    // AM/SAM/DSB/LSB/USB, nothing in CW and the data modes. The level
+    // squelch opens where the S-meter reads -140 + 0.7 * level dBm. Manual
+    // only: the gate reads the whole passband and the panadapter one point's
+    // bandwidth, so a margin above the pan's floor is not a level the gate
+    // can hold (capabilities().squelchLevelScale).
+    ReceiveDispatch requestSliceSquelch(int sliceId, const SliceSquelchRequest& request) override;
+    void setSliceSquelch(int sliceId, bool on, int level) override;
     // brick3-angelia: ANT1..ANT3 on ANGELIA/ORION boards (Alex0 bits 24-26).
     ReceiveDispatch requestSliceRxAntenna(int sliceId, const QString& antenna) override;
     // brick3-angelia: host-side Auto AGC-T (the radio has none). The knob
@@ -230,6 +239,8 @@ public:
         return m_nbKind;
     }
     [[nodiscard]] int noiseBlankerLevelForTest() const noexcept { return m_nbLevel; }
+    [[nodiscard]] bool squelchOnForTest() const noexcept { return m_squelchOn; }
+    [[nodiscard]] int squelchLevelForTest() const noexcept { return m_squelchLevel; }
     [[nodiscard]] AetherSDR::NoiseBlankerFill noiseBlankerFillForTest() const noexcept
     {
         return m_nbFill;
@@ -613,6 +624,21 @@ private:
     // through requestSliceDsp(); retained like the blanker.
     bool m_anfOn = false;
     int m_anfLevel = 50;
+    // brick3-angelia: the squelch as last asked for (setSliceSquelch());
+    // emitSliceState() publishes it and the operating state's "squelch"
+    // extension keeps it per radio. 20 is SliceModel's default level.
+    static constexpr int kDefaultSquelchLevel = 20;
+    bool m_squelchOn = false;
+    int m_squelchLevel = kDefaultSquelchLevel;
+    // The level squelch gates raw dBFS at the ADC, after the step
+    // attenuator; the S-meter and the panadapter add the attenuation back.
+    // Taking it off the threshold keeps the gate where the operator set it
+    // on those scales when the attenuator moves.
+    [[nodiscard]] double squelchLevelOffsetDb() const noexcept
+    {
+        return -static_cast<double>(m_attenuationDb);
+    }
+    void pushSquelch();
     // brick3-angelia: the panadapter analyzer's FFT size (0 = automatic) and
     // window, as AnanSettings holds them: loaded at connect, moved by the
     // "pan.set" verb. A new size rebuilds the DSP; a window applies live.

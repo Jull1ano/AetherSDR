@@ -534,8 +534,31 @@ RadioCapabilities AnanBackend::capabilities() const
     // No register holds a display range: the client is its only memory.
     amplitude.clientPersistsDbmRange = true;
     c.panAmplitude = amplitude;
-    // No measured squelch map; the SQL line and Auto SQL keep Flex's scale.
-    c.squelchLevelScale = legacyDbmSquelchScale();
+    // brick3-angelia: the squelch is host-side, per mode family, as on the
+    // HL2: FM on WDSP's fmsq, AM/SAM/DSB/LSB/USB on the level squelch amsq
+    // (WdspChannel::setSquelch()). CW and the data modes have no stage, so
+    // this is false and the client disables SQL there.
+    c.hasModeIndependentSquelch = false;
+    // amsq's gate, as the S-METER reads it: -140 + 0.7 * level dBm. The gate
+    // is raw dBFS on the samples the meter reads (RXA.c xrxa: amsqcap right
+    // after smeter), and setSliceSquelch() takes the attenuation off it as
+    // onDspMeter() adds it on, so the attenuator does not move it. FM's fmsq
+    // is a noise-quieting gate with no dB place, so only amsq's modes are
+    // listed.
+    // Not comparable with the panadapter, so no SQL line and no Auto SQL:
+    // the gate reads the whole passband, the pan one point's bandwidth, and
+    // the pan's levels are normalised for noise (AnanPanAnalyzer), so a
+    // carrier's peak on it moves with the zoom.
+    {
+        SquelchLevelScale sql;
+        sql.dbPerStep = WdspChannel::kLevelSquelchDbPerStep;
+        sql.offsetDb = WdspChannel::kLevelSquelchBaseDbfs + kSMeterDbmOffset;
+        sql.modes = {QStringLiteral("AM"), QStringLiteral("SAM"), QStringLiteral("DSB"),
+                     QStringLiteral("LSB"), QStringLiteral("USB")};
+        sql.autoSquelch = false;
+        sql.spectrumComparable = false;
+        c.squelchLevelScale = sql;
+    }
 
     // Span follows the sample rate: it snaps by ratio to one of the six DDC0 rates
     // (no continuous zoom); panBandwidthLimitsChanged clamps to that list's ends.
@@ -774,6 +797,14 @@ void AnanBackend::applyRestoredState(const RestoredRadioState& state)
             break;
         m_restoredNotches.push_back(notch);
     }
+    // brick3-angelia: the squelch, unconditional like the rest. A level
+    // outside 0..100 is not restored and the default stands.
+    {
+        const QJsonObject squelch = state.extension.value(QStringLiteral("squelch")).toObject();
+        m_squelchOn = squelch.value(QStringLiteral("on")).toBool(false);
+        const int level = squelch.value(QStringLiteral("level")).toInt(-1);
+        m_squelchLevel = level >= 0 && level <= 100 ? level : kDefaultSquelchLevel;
+    }
     // brick3-angelia: the zoom inside that rate, unconditional like the rest.
     {
         const double span = state.extension.value(QStringLiteral("panView")).toObject()
@@ -839,6 +870,10 @@ RestoredRadioState AnanBackend::currentOperatingState() const
     state.extension.insert(QStringLiteral("notches"), QJsonObject{
         {QStringLiteral("enabled"), m_notchesEnabled},
         {QStringLiteral("entries"), notches}});
+    // brick3-angelia: the squelch (RadioStateMemory keeps it with the AGC).
+    state.extension.insert(QStringLiteral("squelch"), QJsonObject{
+        {QStringLiteral("on"), m_squelchOn},
+        {QStringLiteral("level"), m_squelchLevel}});
     // brick3-angelia: the zoom inside the rate above; 0 = the whole band.
     state.extension.insert(QStringLiteral("panView"), QJsonObject{
         {QStringLiteral("spanHz"), viewSpanHz() < rateHz() ? viewSpanHz() : 0.0}});
@@ -1069,6 +1104,9 @@ void AnanBackend::applyLiveRxState(AnanRxDsp::Config& config) const
     config.emnr = m_nr2;
     config.autoNotch = m_anfOn;
     config.autoNotchLevel = m_anfLevel;
+    config.squelchEnabled = m_squelchOn;
+    config.squelchLevel = m_squelchLevel;
+    config.squelchLevelOffsetDb = squelchLevelOffsetDb();
 }
 
 void AnanBackend::beginDspSetup()
@@ -1426,6 +1464,49 @@ ReceiveDispatch AnanBackend::requestSliceAudio(int sliceId, const SliceAudioRequ
     case SliceAudioRequest::Field::Pan: setSliceAudioPan(sliceId, request.value); break;
     }
     return ReceiveDispatch::Dispatched;
+}
+
+ReceiveDispatch AnanBackend::requestSliceSquelch(int sliceId, const SliceSquelchRequest& request)
+{
+    // Manual only: capabilities() publishes no engine Auto.
+    if (sliceId != kSliceId || !request.valid()
+        || request.kind != SliceSquelchRequest::Kind::Manual) {
+        return ReceiveDispatch::Unsupported;
+    }
+    setSliceSquelch(sliceId, request.enabled, request.level);
+    return ReceiveDispatch::Dispatched;
+}
+
+void AnanBackend::setSliceSquelch(int sliceId, bool on, int level)
+{
+    Q_UNUSED(sliceId);   // one slice in this phase
+    // Not filtered by mode: the pair is stored whatever the mode, and
+    // WdspChannel picks the stage (if any) and moves it on every mode
+    // change, so the order mode and squelch were set in does not matter.
+    const int bounded = std::clamp(level, 0, 100);
+    const bool changed = on != m_squelchOn || bounded != m_squelchLevel;
+    m_squelchOn = on;
+    m_squelchLevel = bounded;
+    pushSquelch();
+    emitSliceState();
+    if (changed)
+        emit operatingStateChanged();   // kept per radio ("squelch" extension)
+}
+
+void AnanBackend::pushSquelch()
+{
+    // The config too: a build in flight is given it by applyLiveRxState(),
+    // and this keeps the copy a later rebuild starts from in step.
+    m_pendingDspConfig.squelchEnabled = m_squelchOn;
+    m_pendingDspConfig.squelchLevel = m_squelchLevel;
+    m_pendingDspConfig.squelchLevelOffsetDb = squelchLevelOffsetDb();
+    if (!m_dsp)
+        return;
+    QMetaObject::invokeMethod(m_dsp,
+        [dsp = m_dsp, on = m_squelchOn, level = m_squelchLevel,
+         offsetDb = squelchLevelOffsetDb()] {
+            dsp->setSquelch(on, level, offsetDb);
+        }, Qt::QueuedConnection);
 }
 
 ReceiveDispatch AnanBackend::requestSliceRxAntenna(int sliceId, const QString& antenna)
@@ -2082,6 +2163,8 @@ void AnanBackend::setPanRfGain(const QString& panId, int gainDb)
                                   Q_ARG(int, m_pendingParams.rx1AdcIndex),
                                   Q_ARG(int, attenuation));
     }
+    // The level squelch is referred to the antenna across the attenuator.
+    pushSquelch();
     emit panRfGainChanged(kPanId, -attenuation);
     emit operatingStateChanged();
 }
@@ -2626,6 +2709,11 @@ void AnanBackend::emitSliceState()
     // cannot loop back as a fresh intent (Principle II).
     d.audioGain = m_sliceAudioGainPercent;
     d.audioMute = m_sliceAudioMuted;
+    // brick3-angelia: the squelch pair as held and pushed to the chain, so
+    // the SQL button and slider show what the receiver runs. Safe to echo:
+    // SliceModel::applyChanges() does not turn it back into a command.
+    d.squelchOn = m_squelchOn;
+    d.squelchLevel = m_squelchLevel;
     // Without this, RadioModel::sliceChanged's handler never assigns the
     // slice a panId (SliceDelta::panId is std::optional and SliceModel::
     // applyChanges() only touches it when set) -- the slice materialised by

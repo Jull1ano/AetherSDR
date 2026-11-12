@@ -149,8 +149,32 @@ void recordsPerBackend()
           "unidentified Icom: Flex's -160 + 1*level, every mode, with Auto SQL");
     check(SimBackend().capabilities().squelchLevelScale == legacy,
           "Demo: Flex's -160 + 1*level, every mode, with Auto SQL");
-    check(anan::AnanBackend().capabilities().squelchLevelScale == legacy,
-          "ANAN: Flex's -160 + 1*level, every mode, with Auto SQL");
+    // brick3-angelia: the ANAN's squelch is host-side like the HL2's, so its
+    // record is amsq's own: -140 + 0.7*level, as the S-meter reads it (the
+    // attenuation is taken off the gate and added to the meter). It is not
+    // comparable with the panadapter, so no SQL line and no Auto SQL.
+    {
+        const RadioCapabilities ananCaps = anan::AnanBackend().capabilities();
+        check(ananCaps.squelchLevelScale.has_value(), "ANAN publishes a squelch scale");
+        check(!ananCaps.hasModeIndependentSquelch, "ANAN: no squelch in CW and the data modes");
+        if (ananCaps.squelchLevelScale) {
+            const SquelchLevelScale& s = *ananCaps.squelchLevelScale;
+            check(nearly(s.dbPerStep, 0.7), "ANAN: 0.7 dB per level step");
+            check(nearly(s.offsetDb, -140.0), "ANAN: amsq's base, -140 dB");
+            QStringList modes = s.modes;
+            modes.sort();
+            check(modes == QStringList({QStringLiteral("AM"), QStringLiteral("DSB"),
+                                        QStringLiteral("LSB"), QStringLiteral("SAM"),
+                                        QStringLiteral("USB")}),
+                  "ANAN: amsq's modes only (no FM, CW or data)");
+            check(!s.autoSquelch, "ANAN: no Auto SQL");
+            check(!s.modesExclusive && !s.automaticInEngine,
+                  "ANAN: the family mode rule, no engine Auto");
+            check(!s.spectrumComparable
+                      && !squelchScaleForMode(ananCaps.squelchLevelScale, QStringLiteral("USB")),
+                  "ANAN: the gate reads the passband, so no display SQL line");
+        }
+    }
 #ifdef AETHER_BACKEND_RTL
     {
         // RTL owns its FM/FMN gate and engine Auto. Its detector bandwidth

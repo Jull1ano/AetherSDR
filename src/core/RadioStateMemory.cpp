@@ -42,6 +42,11 @@ constexpr const char* kExtFiltersKey = "filters";
 // brick3-angelia: the zoom inside the sampled band, beside the sampleRateHz
 // the SpanRate domain already keeps, for a radio where the two are separate.
 constexpr const char* kExtPanViewKey = "panView";
+// brick3-angelia: a single-receiver host-DSP radio's squelch (on, level). It
+// rides the Agc domain: both are receive-chain setpoints the client keeps
+// because the radio has none. (A multi-receiver backend keeps its own under
+// "receivers".)
+constexpr const char* kExtSquelchKey = "squelch";
 
 // The declared domains' sub-objects of `ext`; load() and store() share it so
 // the two gates cannot drift apart.
@@ -54,6 +59,7 @@ QJsonObject gateExtension(const RadioCapabilities& caps, const QJsonObject& ext)
         {Domain::Notches, kExtNotchesKey},
         {Domain::Passband, kExtFiltersKey},
         {Domain::SpanRate, kExtPanViewKey},
+        {Domain::Agc, kExtSquelchKey},
     };
     QJsonObject gated;
     for (const auto& [domain, key] : domains) {

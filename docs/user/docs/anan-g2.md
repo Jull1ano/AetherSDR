@@ -46,6 +46,12 @@ Configure the receive front end under **Settings → Radio Setup... → Radio �
 - **Receive audio cushion** (Radio Setup → ANAN Front End → This Computer's Speaker): how much receive audio is queued ahead of this computer's speaker, 10–200 ms, default 100 ms. Lower it for less audio delay; if the audio starts to tick, go back up (100 ms is the value that cured the ticks). It takes effect at once.
 - **Noise blanker, automatic notch (ANF) and manual notches (MNF)**, all in WDSP on this computer. The title bar has a switch for each beside the frequency readout. Manual notches are placed from the spectrum's right-click menu (or by right-clicking **MNF**, which adds one in the middle of the passband) and dragged onto the carrier; the narrowest notch is 200 Hz. The notches and the **MNF** switch are remembered per radio.
 - **S-meter.**
+- **SQL** (squelch) works per mode family, in WDSP on this computer. Click **SQL** to switch it on, then set the slider; 0 is always open.
+    - **FM, NFM:** a noise squelch. It opens when a carrier quiets the receiver's hiss, whatever its strength, so one setting holds across bands. Higher needs a cleaner signal: with the default 16 kHz filter, 10 opens on a signal about 6 dB over the noise, 20 about 10 dB, 40 about 20 dB. It listens to the hiss above 5 kHz, so keep the FM filter 11 kHz or wider: with a narrow filter (5–6 kHz) the noise only closes it from about 40, and strong signals close it above that.
+    - **AM, SAM, DSB, LSB, USB:** a level squelch. It opens when the S-meter reads above −140 + 0.7 × slider dBm (40 is −112 dBm, 50 is −105 dBm, 80 is −84 dBm). Set it a little above where the S-meter sits on band noise. **RF Gain** does not move it.
+    - The audio stays open for up to 1.5 s after a signal drops (1.2 s in FM), so speech is not chopped between words.
+    - **CW and data modes:** no squelch.
+    - **AUTO** squelch and the SQL line on the panadapter are not offered on this radio: the squelch reads the whole passband, and the panadapter shows the level in one point's bandwidth. The switch and the level are remembered per radio.
 - **NB** cycles Off → **NB** → **NB2** → Off: WDSP's two impulse blankers, run on this computer before the demodulator. **NB** silences each impulse; **NB2** reconstructs the blanked window from the samples either side, and shows an **NB2** fill selector (**Zero**, **Sample hold**, **Mean hold**, **Hold sample** or **Interpolate**) while it runs. Neither is offered in FM.
 - **AGC-T** sets the AGC's maximum gain from −20 to 120 dB, 1.4 dB per slider step, starting at 71 (79.4 dB). With AGC off it sets the fixed gain instead, starting at 29 (20.6 dB). The slider's tooltip shows the gain in dB.
 - **RF Gain** from −31 to 0 dB drives the G2's ADC step attenuator, and is restored per radio.
@@ -74,7 +80,7 @@ To measure your own radio instead, open **Settings → Radio Setup... → Droop 
 
 ### What is remembered
 
-The G2 stores none of its settings, so AetherSDR keeps these per radio: frequency and mode (14.175 MHz USB on a first connect), tuning step, **RF Gain**, the AGC mode, **AGC-T** and AGC-off level, the radio's own output level (what the volume slider sets with PC Audio off) and the panadapter dBm range. The span always starts at the connect form's **Sample rate:**. FFT averaging starts from its defaults.
+The G2 stores none of its settings, so AetherSDR keeps these per radio: frequency and mode (14.175 MHz USB on a first connect), tuning step, **RF Gain**, the AGC mode, **AGC-T** and AGC-off level, the squelch switch and level, the radio's own output level (what the volume slider sets with PC Audio off) and the panadapter dBm range. The span always starts at the connect form's **Sample rate:**. FFT averaging starts from its defaults.
 
 ### Not available on the G2
 

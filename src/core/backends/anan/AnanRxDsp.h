@@ -97,6 +97,12 @@ public:
         // setAutoNotch(). In Config for the same reason as the blanker.
         bool autoNotch = false;
         int autoNotchLevel = 50;
+        // brick3-angelia: receive squelch, kept current by setSquelch(). In
+        // Config for the blanker's reason: a rebuilt channel starts with
+        // every squelch stage off.
+        bool squelchEnabled = false;
+        int squelchLevel = 20;
+        double squelchLevelOffsetDb = 0.0;
         WdspChannel::Mode mode = WdspChannel::Mode::Usb;
         double filterLowHz = 150.0;
         double filterHighHz = 3000.0;
@@ -197,6 +203,13 @@ public:
     void setNr2(bool on, int gainMethod, int npeMethod, bool aeRun);
     // brick3-angelia: WDSP's automatic notch filter (ANF), level 0..100.
     void setAutoNotch(bool on, int level);
+    // brick3-angelia: receive squelch, level 0..100, as Hl2RxDsp's
+    // (WdspChannel::setSquelch()): FM's noise squelch, a level squelch in
+    // AM/SAM/DSB/LSB/USB, nothing in the other modes. `levelOffsetDb` refers
+    // the level squelch to the antenna across the step attenuator. Deferred
+    // like setNoiseBlanker() while a rebuild is in flight; a change the
+    // channel refuses is retried at the top of processIqBlock().
+    void setSquelch(bool on, int level, double levelOffsetDb);
 
     // brick3-angelia: manual notches (Thetis's MNF, the app's TNF): nulls
     // parked at ABSOLUTE RF frequencies, in WDSP's notched bandpass
@@ -410,6 +423,10 @@ private:
     Config m_config;
     // See beginRebuild()/installRebuiltChannel()'s own comments.
     bool m_rebuildInFlight = false;
+    // brick3-angelia: m_config's squelch to m_channel; marks it pending when
+    // the channel refuses, for processIqBlock() to try again.
+    void pushSquelchToChannel();
+    bool m_squelchPending = false;
 
     // Per-outcome counters for m_channel->processIq(); see processTally().
     // Written on the DSP thread in processIqBlock(), read from elsewhere.
