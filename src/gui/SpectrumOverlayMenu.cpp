@@ -302,10 +302,13 @@ static const QString kMenuBtnActive =
     "border: 1px solid #0090e0; border-radius: 2px; "
     "color: #ffffff; font-size: 11px; font-weight: bold; }";
 
+// Band grid buttons are 48 px wide. Without an explicit padding Qt's default
+// push-button padding leaves the label only ~26 px, which clips 2200, 120m,
+// WWV and XVTR; 0 2px leaves 42 px, as on the band bar.
 static const QString kBandBtnStyle =
     "QPushButton { background: rgba(30, 40, 55, 220); "
     "border: 1px solid #304050; border-radius: 3px; "
-    "color: #c8d8e8; font-size: 11px; font-weight: bold; }"
+    "color: #c8d8e8; font-size: 11px; font-weight: bold; padding: 0px 2px; }"
     "QPushButton:hover { background: rgba(0, 112, 192, 180); "
     "border: 1px solid #0090e0; }"
     "QPushButton:checked { background: {{color.background.2}}; "
@@ -315,7 +318,7 @@ static const QString kBandBtnStyle =
 static const QString kBroadcastBtnStyle =
     "QPushButton { background: rgba(30, 40, 55, 220); "
     "border: 1px solid #504030; border-radius: 3px; "
-    "color: #ffcc66; font-size: 11px; font-weight: bold; }"
+    "color: #ffcc66; font-size: 11px; font-weight: bold; padding: 0px 2px; }"
     "QPushButton:hover { background: rgba(160, 110, 0, 180); "
     "border: 1px solid #e0a000; }"
     "QPushButton:checked { background: {{color.background.2}}; "
@@ -324,7 +327,7 @@ static const QString kBroadcastBtnStyle =
 static const QString kXvtrBtnStyle =
     "QPushButton { background: rgba(30, 40, 55, 220); "
     "border: 1px solid #304050; border-radius: 3px; "
-    "color: #00d0ff; font-size: 11px; font-weight: bold; }"
+    "color: #00d0ff; font-size: 11px; font-weight: bold; padding: 0px 2px; }"
     "QPushButton:hover { background: rgba(0, 112, 192, 180); "
     "border: 1px solid #0090e0; }"
     "QPushButton:checked { background: {{color.background.2}}; "
@@ -4115,7 +4118,7 @@ void SpectrumOverlayMenu::setXvtrBands(const QVector<XvtrBand>& bands)
     const QString btnStyle =
         "QPushButton { background: rgba(30, 40, 55, 220); "
         "border: 1px solid #304050; border-radius: 3px; "
-        "color: #c8d8e8; font-size: 11px; font-weight: bold; }"
+        "color: #c8d8e8; font-size: 11px; font-weight: bold; padding: 0px 2px; }"
         "QPushButton:hover { background: rgba(0, 112, 192, 180); "
         "border: 1px solid #0090e0; }";
 
