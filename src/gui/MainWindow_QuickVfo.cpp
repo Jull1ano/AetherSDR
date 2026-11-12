@@ -4,7 +4,7 @@
 //   A / B / A=B    two VFOs on the one receiver (single-receiver radios; a
 //                  radio with a receiver per slice uses slices for that)
 //   Save/Restore   one quick-memory slot
-//   < v >          the last 16 frequencies the receiver stayed on for 4 s
+//   < v >          the last 30 frequencies the receiver stayed on for 4 s
 //
 // QuickVfoMemory keeps the state; this file feeds it the active slice's
 // frequency, mode and filter, tunes the slice to what it hands back, and

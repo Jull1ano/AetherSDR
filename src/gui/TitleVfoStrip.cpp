@@ -1,5 +1,7 @@
 #include "TitleVfoStrip.h"
 
+#include "core/QuickVfoMemory.h"
+
 #include <QAction>
 #include <QHBoxLayout>
 #include <QIcon>
@@ -157,7 +159,9 @@ TitleVfoStrip::TitleVfoStrip(QWidget* parent) : QWidget(parent)
     m_restore = makeButton(this, tr("Restore"), kRestoreWidth, QStringLiteral("titleVfoRestore"),
                            tr("Quick memory restore"), QString());
     const QString historyTip = tr("The last %1 frequencies you stayed on for %2 seconds, "
-                                  "newest first.").arg(16).arg(4);
+                                  "newest first.")
+                                   .arg(QuickVfoMemory::kHistoryCapacity)
+                                   .arg(QuickVfoMemory::kDwellMs / 1000);
     m_prev = makeButton(this, QString(), kArrowWidth, QStringLiteral("titleVfoHistoryPrevious"),
                         tr("History previous"),
                         tr("Step through the frequency history towards the newest. ")

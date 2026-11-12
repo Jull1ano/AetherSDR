@@ -124,12 +124,12 @@ void testHistory()
     CHECK(!m.pick(-1).has_value());
     CHECK(m.selectedIndex() == 0);
 
-    // The 17th frequency pushes the oldest out.
+    // One frequency more than the capacity pushes the oldest out.
     QuickVfoMemory full;
     for (int i = 0; i < QuickVfoMemory::kHistoryCapacity + 1; ++i)
         full.dwell(at(7000000 + i * 1000));
     CHECK(full.history().size() == static_cast<size_t>(QuickVfoMemory::kHistoryCapacity));
-    CHECK(full.history().front().hz == 7016000);
+    CHECK(full.history().front().hz == 7000000 + QuickVfoMemory::kHistoryCapacity * 1000);
     CHECK(full.history().back().hz == 7001000);
 
     m.clearHistory();
@@ -143,7 +143,7 @@ void testRestoreStoredState()
     QuickVfoMemory m;
     std::vector<QuickVfoSetting> stored = {at(14200000), QuickVfoSetting{}, at(7100000),
                                            at(14200000, "CW")};
-    for (int i = 0; i < 20; ++i)
+    for (int i = 0; i < QuickVfoMemory::kHistoryCapacity + 10; ++i)
         stored.push_back(at(10000000 + i * 1000));
     m.restore(Vfo::B, at(7074000, "DIGU"), at(14143000), stored, 1);
     CHECK(m.liveVfo() == Vfo::B);

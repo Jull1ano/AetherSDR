@@ -32,7 +32,7 @@ struct QuickVfoSetting {
 
 class QuickVfoMemory {
 public:
-    static constexpr int kHistoryCapacity = 16;   // Thetis keeps 16
+    static constexpr int kHistoryCapacity = 30;   // Thetis keeps 16; 30 asked for here
     static constexpr int kDwellMs = 4000;         // Thetis waits 4 s
 
     enum class Vfo { A, B };
