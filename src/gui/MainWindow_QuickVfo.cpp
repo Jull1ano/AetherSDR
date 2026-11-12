@@ -152,9 +152,17 @@ void MainWindow::tuneToQuickVfo(const QuickVfoSetting& setting, const char* sour
         return;
     // Mode first (it may bring its own filter), then the frequency, then the
     // filter: the band stack recall's order (RadioModel::recallBandStack).
+    // The mode was read off this radio's own slice, so it is one it runs; a
+    // host-DSP backend (ANAN, HL2) publishes no mode list to check it against.
     const QString mode = QString::fromStdString(setting.mode);
-    if (!mode.isEmpty() && mode != slice->mode() && slice->modeList().contains(mode))
+    const QStringList modes = slice->modeList();
+    const bool modeKnown = !mode.isEmpty() && (modes.isEmpty() || modes.contains(mode));
+    if (modeKnown && mode != slice->mode())
         slice->setMode(mode);
+    // The stored mode is the operator's: the broadcast-band rule must not
+    // switch it to AM (or back out of AM) on this tune, as for a band button.
+    if (modeKnown && std::llround(slice->frequency() * 1.0e6) != setting.hz)
+        m_radioModel.noteOperatorChosenMode(slice->sliceId());
     applyTuneRequest(slice, setting.hz / 1.0e6, TuneIntent::AbsoluteJump, source);
     if (setting.filterLow != 0 || setting.filterHigh != 0)
         slice->setFilterWidth(setting.filterLow, setting.filterHigh);
