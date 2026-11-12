@@ -286,6 +286,17 @@
                 { "at": 0.80, "color": "#a8dcff" },
                 { "at": 1.00, "color": "#ffffff" }
               ]
+            },
+            "volcano": {
+              "type": "linear-gradient",
+              "angle": 180,
+              "stops": [
+                { "at": 0.00, "color": "#000000" },
+                { "at": 0.08, "color": "#000000" },
+                { "at": 0.36, "color": "#0e124a" },
+                { "at": 0.80, "color": "#f5487f" },
+                { "at": 1.00, "color": "#fffad5" }
+              ]
             }
           },
           "slice": {

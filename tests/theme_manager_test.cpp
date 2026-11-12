@@ -211,9 +211,9 @@ int main(int argc, char** argv)
     EXPECT_TRUE(!badOut.contains("{{"));
 
     // ── Phase 2 gradient token support ──
-    // The waterfall.colormap tokens are now a nested family of seven named
+    // The waterfall.colormap tokens are now a nested family of eight named
     // presets (default / grayscale / blueGreen / fire / plasma / purple /
-    // glacier), each a linear gradient covering the RF visualisation range.  Verifies the
+    // glacier / volcano), each a linear gradient covering the RF visualisation range.  Verifies the
     // full gradient parsing + brush construction + cssFragment emission +
     // resolve() routing path end-to-end against the canonical
     // .default preset (7 stops, black → navy → … → red) and asserts the

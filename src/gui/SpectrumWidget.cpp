@@ -809,7 +809,8 @@ const char* wfSchemeToken(WfColorScheme s)
     case WfColorScheme::Plasma:    return "color.waterfall.colormap.plasma";
     case WfColorScheme::Purple:    return "color.waterfall.colormap.purple";
     case WfColorScheme::Glacier:   return "color.waterfall.colormap.glacier";
-    default:                       return "color.waterfall.colormap.default";
+    case WfColorScheme::Volcano:   return "color.waterfall.colormap.volcano";
+    default:                      return "color.waterfall.colormap.default";
     }
 }
 

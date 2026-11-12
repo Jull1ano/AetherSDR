@@ -303,6 +303,17 @@ void ThemeManager::seedGeneratedDefaults()
         g.stops.append({1.0, QColor("#ffffff")});
         m_tokens.insert("color.waterfall.colormap.purple", QVariant::fromValue(g));
     }
+    {
+        ThemeGradient g;
+        g.type = ThemeGradient::Linear;
+        g.angle = 180.0;
+        g.stops.append({0.0, QColor("#000000")});
+        g.stops.append({0.08, QColor("#000000")});
+        g.stops.append({0.36, QColor("#0e124a")});
+        g.stops.append({0.8, QColor("#f5487f")});
+        g.stops.append({1.0, QColor("#fffad5")});
+        m_tokens.insert("color.waterfall.colormap.volcano", QVariant::fromValue(g));
+    }
     m_tokens.insert("color.waterfall.history", QString("#506070"));
     m_tokens.insert("color.waterfall.live", QString("#ff4d4d"));
     m_tokens.insert("color.waterfall.timeMarker.background", QString("#dc0f0f1a"));

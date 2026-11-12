@@ -76,6 +76,7 @@ enum class WfColorScheme : int {
     Plasma,        // black → purple → magenta → orange → yellow
     Purple,        // SmartSDR "Add Purple": black→blue→green→yellow→red→purple→white
     Glacier,       // deep blue → blue → ice blue → white (first preset not black at t=0)
+    Volcano,       // black → navy → hot pink → cream (brick3-angelia)
     Count          // sentinel — number of schemes
 };
 
@@ -97,6 +98,7 @@ inline const char* wfSchemeName(WfColorScheme scheme)
     case WfColorScheme::Plasma:    return "Plasma";
     case WfColorScheme::Purple:    return "Purple";
     case WfColorScheme::Glacier:   return "Glacier";
+    case WfColorScheme::Volcano:   return "Volcano";
     default:                       return "Default";
     }
 }

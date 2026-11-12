@@ -291,7 +291,7 @@ On an ANAN the **FFT AVG** readout is a time in milliseconds (one step is 10 ms)
 |---------|-------------|
 | **Grid** | Frequency grid spacing (Auto adapts to the span). |
 | **Scale text** | Size of the frequency-scale labels. |
-| **Scheme** | Waterfall palette: Default, Grayscale, Blue-Green, Fire, Plasma, Purple, Glacier. Changing it recolors the waterfall already on screen, including scrollback. |
+| **Scheme** | Waterfall palette: Default, Grayscale, Blue-Green, Fire, Plasma, Purple, Glacier, Volcano. Changing it recolors the waterfall already on screen, including scrollback. |
 
 #### 3D VIEW
 

@@ -131,7 +131,7 @@ int main(int argc, char** argv)
     // the generator were unseeded before it existed, which is what it was
     // written to fix; glacier postdates it and rides the same path.)
     for (const char* map : {"default", "fire", "plasma", "purple",
-                            "blueGreen", "grayscale", "glacier"}) {
+                            "blueGreen", "grayscale", "glacier", "volcano"}) {
         const ThemeGradient g =
             tm.gradient(QStringLiteral("color.waterfall.colormap.")
                         + QLatin1String(map));
@@ -149,7 +149,7 @@ int main(int argc, char** argv)
     // change would be silent, and if glacier's floor drifted the clear paths
     // would stop matching floor-level signal.
     for (const char* map : {"default", "fire", "plasma", "purple",
-                            "blueGreen", "grayscale"}) {
+                            "blueGreen", "grayscale", "volcano"}) {
         const ThemeGradient g =
             tm.gradient(QStringLiteral("color.waterfall.colormap.")
                         + QLatin1String(map));
