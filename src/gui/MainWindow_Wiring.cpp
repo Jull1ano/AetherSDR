@@ -3995,6 +3995,8 @@ void MainWindow::wirePanadapter(PanadapterApplet* applet)
         // A bar built after the slice was activated starts on its band.
         if (auto* active = activeSlice())
             bar->setCurrentFrequencyMhz(active->frequency());
+        // Its mode buttons and quick RX controls mirror the RX Controls panel.
+        bar->setQuickRxSource(m_appletPanel ? m_appletPanel->rxApplet() : nullptr);
     }
     const quint64 rangeWiringEpoch = sw->advanceDbmRangeWireEpoch();
     if (!sw->capturePlacementAction()) {

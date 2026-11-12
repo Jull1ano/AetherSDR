@@ -6,7 +6,7 @@ description: "AetherSDR has two kinds of keyboard shortcut."
 
 AetherSDR has two kinds of keyboard shortcut:
 
-- **Operating shortcuts** drive the radio: tuning, MOX, push-to-talk, AF gain, band and mode changes and so on. They are **off by default**.
+- **Operating shortcuts** drive the radio: tuning, MOX, push-to-talk, AF gain, band and mode changes and so on. They are **off by default**. A few that key nothing work even while they are off: **M** (mute), the mode keys **U**, **L**, **A** and **F**, and **F9** (side panel).
 - **Application shortcuts** belong to menus and windows (Minimal Mode, UI scale, Full Screen). They always work.
 
 <img src="/img/screens/keyboard-shortcuts.png" width="1100" alt="Keyboard shortcuts editor. A full keyboard map fills the upper part of the window, with bound keys colored by category, for example T for MOX and Space for PTT in red, G for go to frequency, and the arrow keys for tuning. A color legend lists the categories. Below are Key and Action fields with Clear and Reset to Default buttons, a filter box and category selector, and a table of actions with their category, current key and default key, starting with Tune Up (1 step) on Right, and Import…, Export…, Reset All to Defaults and Close buttons." />
@@ -66,9 +66,11 @@ The editor works one key at a time, so it is easiest for single-key bindings. Cl
 | **T** | Toggle MOX |
 | **Space** | Push-to-talk while held |
 | **Up / Down** | AF gain up / down |
-| **M** | Mute toggle |
+| **M** | Mute toggle (works with operating shortcuts off) |
 | **]** / **[** | Step size up / down |
-| **L** | Tune lock toggle |
+| **Shift+L** | Tune lock toggle |
+| **U** / **L** / **A** / **F** | USB / LSB / AM / FM (work with operating shortcuts off) |
+| **F9** | Hide or show the side panel (works with operating shortcuts off) |
 
 #### Push-to-talk hold
 
@@ -134,7 +136,7 @@ A text field has focus, so AetherSDR leaves the key to it.
 
 The slice is tune-locked, or no radio is connected.
 
-1. Press **L** (Tune lock toggle), or click the 🔒 button beside the VFO flag, to unlock the slice.
+1. Press **Shift+L** (Tune lock toggle), or click the 🔒 button beside the VFO flag, to unlock the slice.
 2. Check that a radio is connected; operating shortcuts do nothing to the radio while disconnected.
 
 ### An import took one of my keys

@@ -127,8 +127,13 @@ bool shortcutGuard() {
     return s_keyboardShortcutsEnabled && !shortcutInputCaptured();
 }
 
+// brick3-angelia: an always-on key (M, the mode letters, F9) is held back only
+// while the operator is typing text. A list box that kept the focus after a
+// choice (#3908), or a slider just touched (the lease), does not hold it: the
+// shortcut takes those key presses either way, so refusing them here only made
+// the key do nothing until the focus moved.
 bool alwaysOnShortcutGuard() {
-    return !shortcutInputCaptured();
+    return !textEntryCaptured();
 }
 
 // True while the lease holder is actively being dragged with the mouse, so the
@@ -1358,15 +1363,31 @@ void MainWindow::registerShortcutActions()
     }
 
     // ── Mode ────────────────────────────────────────────────────────────
+    // brick3-angelia: one-letter keys for the modes used most, as in Thetis:
+    // U USB, L LSB, A AM, F FM. They key nothing, so they work with the
+    // Keyboard Shortcuts switch off (setAlwaysOn). A text field being typed
+    // into takes the letter itself, before any shortcut sees it.
+    static constexpr const char* kModeDefaultKeys[][2] = {
+        {"USB", "U"}, {"LSB", "L"}, {"AM", "A"}, {"FM", "F"},
+    };
+    const auto modeDefaultKey = [](const QString& mode) {
+        for (const auto& row : kModeDefaultKeys) {
+            if (mode == QLatin1String(row[0]))
+                return QString::fromLatin1(row[1]);
+        }
+        return QString();
+    };
     const QStringList modes = modeActionModes();
     for (const QString& m : modes) {
         m_shortcutManager.registerAction(
             QString("mode_%1").arg(m.toLower()), m, "Mode",
-            QKeySequence(), [this, m]() {
+            QKeySequence(modeDefaultKey(m)), [this, m]() {
                 if (!m_radioModel.isConnected()) return;
                 auto* s = activeSlice();
                 if (s) s->setMode(m);
             });
+        if (!modeDefaultKey(m).isEmpty())
+            m_shortcutManager.setAlwaysOn(QString("mode_%1").arg(m.toLower()), true);
     }
 
     // ── TX ──────────────────────────────────────────────────────────────
@@ -1619,8 +1640,9 @@ void MainWindow::registerShortcutActions()
         QKeySequence(Qt::Key_BracketRight), [cycleStep]() { cycleStep(1); });
     m_shortcutManager.registerAction("step_down", "Step Size Down", "Tuning",
         QKeySequence(Qt::Key_BracketLeft), [cycleStep]() { cycleStep(-1); });
+    // brick3-angelia: Shift+L, so that L is LSB (the mode keys above).
     m_shortcutManager.registerAction("lock_toggle", "Tune Lock Toggle", "Tuning",
-        QKeySequence(Qt::Key_L), [this]() {
+        QKeySequence(Qt::SHIFT | Qt::Key_L), [this]() {
             auto* s = activeSlice();
             if (s) s->setLocked(!s->isLocked());
         });
@@ -1871,6 +1893,20 @@ void MainWindow::registerShortcutActions()
     // which is also why the canvas-vs-minimal handoff went untested.
     m_shortcutManager.registerAction("minimal_mode", "Minimal Mode Toggle", "Display",
         QKeySequence(), [this]() { toggleMinimalModeFromAction(); });
+    // brick3-angelia: the applet panel hidden or shown again -- the title
+    // bar's lit dock icon does the same -- on F9, Thetis's Collapse key. A
+    // floating panel lives in its own window and is left alone.
+    m_shortcutManager.registerAction("side_panel_toggle", "Side Panel Show/Hide", "Display",
+        QKeySequence(Qt::Key_F9), [this]() {
+            bool floating = false;
+            bool dockedLeft = false;
+            bool visible = false;
+            appletPanelState(&floating, &dockedLeft, &visible);
+            if (floating)
+                return;
+            applyAppletPanelState(/*floating=*/false, dockedLeft, !visible);
+        });
+    m_shortcutManager.setAlwaysOn("side_panel_toggle", true);
 
     // ── RIT/XIT ─────────────────────────────────────────────────────────
     m_shortcutManager.registerAction("rit_toggle", "RIT Toggle", "RIT/XIT",

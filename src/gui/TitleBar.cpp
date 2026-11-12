@@ -554,7 +554,8 @@ TitleBar::TitleBar(QWidget* parent)
     m_dockLeftLbl->setFixedHeight(24);
     m_dockLeftLbl->setAlignment(Qt::AlignCenter);
     m_dockLeftLbl->setCursor(Qt::PointingHandCursor);
-    m_dockLeftLbl->setToolTip("Dock applet panel to the left of the panadapter");
+    m_dockLeftLbl->setToolTip("Dock the applet panel on the left of the panadapter. "
+                              "Click it again to hide the panel (F9 hides and shows it).");
     m_dockLeftLbl->setAccessibleName(tr("Dock applet panel left"));
     m_dockLeftLbl->setAccessibleDescription(
         tr("Move the applet panel to the left of the panadapter, or hide it "
@@ -570,7 +571,8 @@ TitleBar::TitleBar(QWidget* parent)
     m_dockRightLbl->setFixedHeight(24);
     m_dockRightLbl->setAlignment(Qt::AlignCenter);
     m_dockRightLbl->setCursor(Qt::PointingHandCursor);
-    m_dockRightLbl->setToolTip("Dock applet panel to the right of the panadapter");
+    m_dockRightLbl->setToolTip("Dock the applet panel on the right of the panadapter. "
+                               "Click it again to hide the panel (F9 hides and shows it).");
     m_dockRightLbl->setAccessibleName(tr("Dock applet panel right"));
     m_dockRightLbl->setAccessibleDescription(
         tr("Move the applet panel to the right of the panadapter, or hide it "

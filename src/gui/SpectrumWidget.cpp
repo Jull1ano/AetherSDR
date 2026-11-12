@@ -11439,7 +11439,21 @@ void SpectrumWidget::mouseMoveEvent(QMouseEvent* ev)
         const double hzPerPx = (effectiveBandwidthMhz() * 1.0e6) / contentWidth();
         int hz = m_filterDragStartHz + static_cast<int>(std::round((mx - m_filterDragStartX) * hzPerPx));
 
-        if (m_draggingFilter == FilterEdge::Low) {
+        // brick3-angelia: a double-sideband mode's passband stays symmetric
+        // about the carrier -- dragging either edge moves both, however
+        // lopsided it was -- and Shift drags the one edge alone. Every other
+        // mode drags the one edge, as before.
+        const QString mode = ao->mode.toUpper();
+        const bool doubleSideband = mode == QLatin1String("AM") || mode == QLatin1String("SAM")
+            || mode == QLatin1String("FM") || mode == QLatin1String("NFM")
+            || mode == QLatin1String("DFM") || mode == QLatin1String("DSB");
+        if (doubleSideband && !ev->modifiers().testFlag(Qt::ShiftModifier)) {
+            constexpr int kMinHalfWidthHz = 50;
+            const int half = std::max(kMinHalfWidthHz,
+                                      m_draggingFilter == FilterEdge::Low ? -hz : hz);
+            ao->filterLowHz = -half;
+            ao->filterHighHz = half;
+        } else if (m_draggingFilter == FilterEdge::Low) {
             ao->filterLowHz = hz;
         } else {
             ao->filterHighHz = hz;

@@ -2,36 +2,49 @@
 
 #include "core/AppSettings.h"
 #include "gui/BandButtonCatalog.h"
+#include "gui/RxApplet.h"
 
+#include <QAbstractItemView>
 #include <QColor>
+#include <QComboBox>
+#include <QCoreApplication>
 #include <QEnterEvent>
 #include <QFont>
 #include <QFontMetrics>
 #include <QFrame>
+#include <QHideEvent>
+#include <QIcon>
+#include <QLabel>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPushButton>
 #include <QResizeEvent>
+#include <QShowEvent>
+#include <QSignalBlocker>
 #include <QSizePolicy>
+#include <QSlider>
 
 #include <algorithm>
+#include <array>
 #include <functional>
+#include <limits>
 
 namespace AetherSDR {
 
 namespace {
 
 // Matches the Band menu's buttons (SpectrumOverlayMenu kBandBtnStyle);
-// broadcast labels in amber.
+// broadcast labels in amber, modes in green.
 const QString kAmateurStyle = QStringLiteral(
     "QPushButton { background: rgba(30, 40, 55, 220); border: 1px solid #304050; "
     "border-radius: 2px; color: #c8d8e8; font-size: 11px; font-weight: bold; "
     "padding: 0px 2px; }"
     "QPushButton:hover { background: rgba(0, 112, 192, 180); border: 1px solid #0090e0; }"
     "QPushButton:pressed { background: rgba(0, 112, 192, 230); }"
-    // The band the receiver is in: the hover look, held.
+    // The band (or setting) in force: the hover look, held.
     "QPushButton:checked { background: rgba(0, 112, 192, 210); border: 1px solid #30b0ff; "
-    "color: #ffffff; }");
+    "color: #ffffff; }"
+    "QPushButton:disabled { color: #56687a; border: 1px solid #263442; }");
 const QString kBroadcastStyle = QStringLiteral(
     "QPushButton { background: rgba(30, 40, 55, 220); border: 1px solid #504030; "
     "border-radius: 2px; color: #ffcc66; font-size: 11px; font-weight: bold; "
@@ -40,22 +53,70 @@ const QString kBroadcastStyle = QStringLiteral(
     "QPushButton:pressed { background: rgba(160, 110, 0, 230); }"
     "QPushButton:checked { background: rgba(160, 110, 0, 210); border: 1px solid #ffc030; "
     "color: #ffffff; }");
+const QString kModeStyle = QStringLiteral(
+    "QPushButton { background: rgba(30, 40, 55, 220); border: 1px solid #2c5048; "
+    "border-radius: 2px; color: #a8e8d0; font-size: 11px; font-weight: bold; "
+    "padding: 0px 2px; }"
+    "QPushButton:hover { background: rgba(0, 140, 110, 180); border: 1px solid #20c090; }"
+    "QPushButton:pressed { background: rgba(0, 140, 110, 230); }"
+    "QPushButton:checked { background: rgba(0, 140, 110, 210); border: 1px solid #40e0b0; "
+    "color: #ffffff; }"
+    "QPushButton:disabled { color: #4c6a62; border: 1px solid #243a36; }");
+const QString kSliderStyle = QStringLiteral(
+    "QSlider::groove:horizontal { height: 4px; background: #24384c; border-radius: 2px; }"
+    "QSlider::sub-page:horizontal { background: #1e8fd0; border-radius: 2px; }"
+    "QSlider::handle:horizontal { background: #c8d8e8; width: 10px; margin: -4px 0px; "
+    "border-radius: 5px; }"
+    "QSlider::handle:horizontal:hover { background: #ffffff; }"
+    "QSlider::sub-page:horizontal:disabled { background: #3a4a5a; }"
+    "QSlider::handle:horizontal:disabled { background: #56687a; }");
+const QString kComboStyle = QStringLiteral(
+    "QComboBox { background: rgba(30, 40, 55, 220); border: 1px solid #304050; "
+    "border-radius: 2px; color: #c8d8e8; font-size: 11px; font-weight: bold; "
+    "padding: 0px 4px; }"
+    "QComboBox:hover { border: 1px solid #0090e0; }"
+    "QComboBox:disabled { color: #56687a; }"
+    "QComboBox::drop-down { width: 12px; border: none; }"
+    "QComboBox QAbstractItemView { background: #1a2433; color: #c8d8e8; "
+    "selection-background-color: #0070c0; }");
+const QString kValueStyle = QStringLiteral(
+    "QLabel { background: rgba(20, 28, 40, 220); border: 1px solid #304050; "
+    "border-radius: 2px; color: #c8d8e8; font-size: 11px; font-weight: bold; }"
+    "QLabel:disabled { color: #56687a; }");
 
 constexpr int kLabelPixelSize = 11;   // the styles' font-size
 constexpr int kButtonHeight = 20;
 constexpr int kButtonPadding = 14;    // beside the widest label
 constexpr int kMinButtonWidth = 34;
 constexpr int kSpacing = 2;           // between two buttons
-constexpr int kGroupGap = 11;         // between two groups, a separator in it
+constexpr int kRowSpacing = 2;        // between two rows of a block
+constexpr int kBlockRows = 2;         // a block of buttons is this many rows tall
+constexpr int kGroupGap = 11;         // between two blocks, a separator in it
 constexpr int kSeparatorWidth = 3;
-constexpr int kRowSpacing = 2;
+constexpr int kLineSpacing = 4;       // between two lines of blocks
 constexpr int kMarginV = 2;
 constexpr int kGripWidth = 9;
-constexpr int kGripGap = 4;           // between a grip and the buttons
+constexpr int kGripGap = 4;           // between a grip and the blocks
 
-QString widthKey() { return QStringLiteral("BandBarWidth"); }
+// The quick RX block: two rows -- filter presets, then step / volume, then
+// AGC / squelch.
+constexpr int kQuickRowY1 = kButtonHeight + kRowSpacing;
+constexpr int kQuickRxHeight = 2 * kButtonHeight + kRowSpacing;
+constexpr int kFilterButtonWidth = 40;
+constexpr int kQuickColA = 3 * kFilterButtonWidth + 2 * kSpacing + 8;   // 132
+constexpr int kQuickColB = kQuickColA + 102 + 8;                        // 242
+constexpr int kQuickRxWidth = kQuickColB + 196;                         // 438
 
-// A grip beside the buttons: dragging it makes the bar narrower or wider.
+// Not "BandBarWidth", the key of the earlier bar of bands alone: a width
+// dragged there would fold this wider bar onto three lines.
+QString widthKey() { return QStringLiteral("BandBarBlocksWidth"); }
+
+QString barText(const char* text)
+{
+    return QCoreApplication::translate("AetherSDR::BandBar", text);
+}
+
+// A grip beside the blocks: dragging it makes the bar narrower or wider.
 // Callbacks rather than signals, so it needs no moc.
 class BandBarGrip : public QWidget {
 public:
@@ -147,7 +208,302 @@ private:
     double m_pressX = 0.0;
 };
 
+// ---- mirroring a control of the RX Controls panel -------------------------
+// A source that is disabled, or hidden for this mode, greys its mirror.
+// "Hidden" is asked up to the panel and no further: the panel hides a whole
+// row by its container (AGC in FM), while the panel itself, or the side panel
+// around it, being hidden must not grey the bar.
+
+bool usable(const QWidget* source, const QWidget* panel)
+{
+    if (!source || !source->isEnabled())
+        return false;
+    return panel ? source->isVisibleTo(panel) : !source->isHidden();
+}
+
+void mirrorButton(QPushButton* mirror, const QPushButton* source, const QWidget* panel,
+                  bool copyFace, bool copyChecked = true)
+{
+    const bool on = usable(source, panel);
+    if (mirror->isEnabled() != on)
+        mirror->setEnabled(on);
+    if (!source)
+        return;
+    if (copyFace) {
+        if (mirror->text() != source->text())
+            mirror->setText(source->text());
+        if (mirror->icon().cacheKey() != source->icon().cacheKey())
+            mirror->setIcon(source->icon());
+    }
+    if (copyChecked) {
+        if (mirror->isCheckable() != source->isCheckable())
+            mirror->setCheckable(source->isCheckable());
+        if (mirror->isCheckable() && mirror->isChecked() != source->isChecked()) {
+            const QSignalBlocker block(mirror);
+            mirror->setChecked(source->isChecked());
+        }
+    }
+    const QString tip = source->toolTip();
+    if (!tip.isEmpty() && mirror->toolTip() != tip)
+        mirror->setToolTip(tip);
+}
+
+void mirrorSlider(QSlider* mirror, const QSlider* source, const QWidget* panel)
+{
+    const bool on = usable(source, panel);
+    if (mirror->isEnabled() != on)
+        mirror->setEnabled(on);
+    // Not while the operator is moving the mirror: it is the one that is right.
+    if (!source || mirror->isSliderDown())
+        return;
+    const QSignalBlocker block(mirror);
+    if (mirror->minimum() != source->minimum() || mirror->maximum() != source->maximum())
+        mirror->setRange(source->minimum(), source->maximum());
+    if (mirror->value() != source->value())
+        mirror->setValue(source->value());
+}
+
+void mirrorCombo(QComboBox* mirror, const QComboBox* source, const QWidget* panel)
+{
+    const bool on = usable(source, panel);
+    if (mirror->isEnabled() != on)
+        mirror->setEnabled(on);
+    // Not while its list is open.
+    if (!source || (mirror->view() && mirror->view()->isVisible()))
+        return;
+    const QSignalBlocker block(mirror);
+    bool same = mirror->count() == source->count();
+    for (int i = 0; same && i < source->count(); ++i)
+        same = mirror->itemText(i) == source->itemText(i);
+    if (!same) {
+        mirror->clear();
+        for (int i = 0; i < source->count(); ++i)
+            mirror->addItem(source->itemText(i), source->itemData(i));
+    }
+    if (mirror->currentIndex() != source->currentIndex())
+        mirror->setCurrentIndex(source->currentIndex());
+}
+
 }  // namespace
+
+// The quick RX block: the RX Controls panel's filter presets, tuning step,
+// AGC mode and threshold, volume and squelch, in two compact rows. Each
+// control mirrors the panel's own (RxApplet::quickControls()): it shows that
+// control's state and acts by clicking or setting it, so the panel's rules
+// apply unchanged. BandBar calls sync() on its timer.
+class QuickRxStrip : public QWidget {
+public:
+    explicit QuickRxStrip(QWidget* parent);
+
+    void setSource(RxApplet* source)
+    {
+        m_source = source;
+        sync();
+    }
+    void sync();
+
+private:
+    RxApplet::QuickControls controls() const
+    {
+        return m_source ? m_source->quickControls() : RxApplet::QuickControls{};
+    }
+    void syncSoon()
+    {
+        QTimer::singleShot(0, this, [this] { sync(); });
+        QTimer::singleShot(200, this, [this] { sync(); });
+    }
+    QPushButton* makeButton(const QRect& at, const QString& text, const QString& name);
+    QSlider* makeSlider(const QRect& at, const QString& name);
+
+    QPointer<RxApplet> m_source;
+    std::array<QPushButton*, 6> m_filter{};
+    std::array<QPointer<QPushButton>, 6> m_filterSource;
+    QPushButton* m_stepDown{nullptr};
+    QLabel* m_step{nullptr};
+    QPushButton* m_stepUp{nullptr};
+    QComboBox* m_agc{nullptr};
+    QSlider* m_agcThreshold{nullptr};
+    QPushButton* m_agcAuto{nullptr};
+    QPushButton* m_mute{nullptr};
+    QSlider* m_af{nullptr};
+    QPushButton* m_squelch{nullptr};
+    QSlider* m_squelchLevel{nullptr};
+};
+
+QuickRxStrip::QuickRxStrip(QWidget* parent) : QWidget(parent)
+{
+    setObjectName(QStringLiteral("bandBarQuickRx"));
+    setFixedSize(kQuickRxWidth, kQuickRxHeight);
+
+    // Filter presets: two rows of three.
+    for (int i = 0; i < 6; ++i) {
+        const QRect at((i % 3) * (kFilterButtonWidth + kSpacing), i < 3 ? 0 : kQuickRowY1,
+                       kFilterButtonWidth, kButtonHeight);
+        m_filter[i] = makeButton(at, QString(), barText("Filter width"));
+        m_filter[i]->setCheckable(true);
+        connect(m_filter[i], &QPushButton::clicked, this, [this, i] {
+            if (QPushButton* source = m_filterSource[i])
+                source->click();
+            syncSoon();
+        });
+    }
+
+    // Column A: the tuning step over the volume.
+    m_stepDown = makeButton(QRect(kQuickColA, 0, 18, kButtonHeight), QString(QChar(0x25C0)),
+                            barText("Smaller tuning step"));
+    m_step = new QLabel(this);
+    m_step->setGeometry(kQuickColA + 20, 0, 62, kButtonHeight);
+    m_step->setAlignment(Qt::AlignCenter);
+    m_step->setStyleSheet(kValueStyle);
+    m_step->setToolTip(barText("Tuning step"));
+    m_step->setAccessibleName(barText("Tuning step"));
+    m_stepUp = makeButton(QRect(kQuickColA + 84, 0, 18, kButtonHeight), QString(QChar(0x25B6)),
+                          barText("Larger tuning step"));
+    connect(m_stepDown, &QPushButton::clicked, this, [this] {
+        if (QPushButton* source = controls().stepDown)
+            source->click();
+        syncSoon();
+    });
+    connect(m_stepUp, &QPushButton::clicked, this, [this] {
+        if (QPushButton* source = controls().stepUp)
+            source->click();
+        syncSoon();
+    });
+    m_mute = makeButton(QRect(kQuickColA, kQuickRowY1, 24, kButtonHeight), QString(),
+                        barText("Mute"));
+    m_mute->setIconSize(QSize(14, 14));
+    connect(m_mute, &QPushButton::clicked, this, [this] {
+        if (QPushButton* source = controls().mute)
+            source->click();
+        syncSoon();
+    });
+    m_af = makeSlider(QRect(kQuickColA + 26, kQuickRowY1, 76, kButtonHeight),
+                      barText("Volume (AF gain)"));
+    connect(m_af, &QSlider::valueChanged, this, [this](int v) {
+        if (QSlider* source = controls().afGain)
+            source->setValue(v);
+    });
+
+    // Column B: AGC over squelch.
+    m_agc = new QComboBox(this);
+    m_agc->setGeometry(kQuickColB, 0, 62, kButtonHeight);
+    m_agc->setFocusPolicy(Qt::NoFocus);
+    m_agc->setStyleSheet(kComboStyle);
+    m_agc->setToolTip(barText("AGC mode"));
+    m_agc->setAccessibleName(barText("AGC mode"));
+    connect(m_agc, QOverload<int>::of(&QComboBox::activated), this, [this](int index) {
+        if (QComboBox* source = controls().agcMode) {
+            // Not a mode the panel has disabled for this radio: the panel
+            // would show it and never send it.
+            const QModelIndex item = source->model()->index(index, source->modelColumn());
+            if (source->model()->flags(item).testFlag(Qt::ItemIsEnabled))
+                source->setCurrentIndex(index);
+        }
+        syncSoon();
+    });
+    m_agcThreshold = makeSlider(QRect(kQuickColB + 64, 0, 104, kButtonHeight),
+                                barText("AGC threshold"));
+    connect(m_agcThreshold, &QSlider::valueChanged, this, [this](int v) {
+        if (QSlider* source = controls().agcThreshold)
+            source->setValue(v);
+    });
+    m_agcAuto = makeButton(QRect(kQuickColB + 170, 0, 26, kButtonHeight), QStringLiteral("A"),
+                           barText("Automatic AGC threshold"));
+    connect(m_agcAuto, &QPushButton::clicked, this, [this] {
+        if (QPushButton* source = controls().autoAgcThreshold)
+            source->click();
+        syncSoon();
+    });
+    m_squelch = makeButton(QRect(kQuickColB, kQuickRowY1, 40, kButtonHeight),
+                           QStringLiteral("SQL"), barText("Squelch on or off"));
+    connect(m_squelch, &QPushButton::clicked, this, [this] {
+        if (QPushButton* source = controls().squelch)
+            source->click();
+        syncSoon();
+    });
+    m_squelchLevel = makeSlider(QRect(kQuickColB + 42, kQuickRowY1, 154, kButtonHeight),
+                                barText("Squelch level"));
+    connect(m_squelchLevel, &QSlider::valueChanged, this, [this](int v) {
+        if (QSlider* source = controls().squelchLevel)
+            source->setValue(v);
+    });
+
+    sync();
+}
+
+QPushButton* QuickRxStrip::makeButton(const QRect& at, const QString& text, const QString& name)
+{
+    auto* button = new QPushButton(text, this);
+    button->setGeometry(at);
+    // No focus anywhere in the bar: a focused control would take the keys
+    // the mode and tuning shortcuts use.
+    button->setFocusPolicy(Qt::NoFocus);
+    button->setStyleSheet(kAmateurStyle);
+    button->setToolTip(name);
+    button->setAccessibleName(name);
+    return button;
+}
+
+QSlider* QuickRxStrip::makeSlider(const QRect& at, const QString& name)
+{
+    auto* slider = new QSlider(Qt::Horizontal, this);
+    slider->setGeometry(at);
+    slider->setFocusPolicy(Qt::NoFocus);
+    slider->setStyleSheet(kSliderStyle);
+    slider->setToolTip(name);
+    slider->setAccessibleName(name);
+    return slider;
+}
+
+void QuickRxStrip::sync()
+{
+    const RxApplet::QuickControls c = controls();
+    const QWidget* panel = m_source.data();
+
+    // The presets the panel shows, at most six.
+    int shown = 0;
+    for (QPushButton* source : c.filterButtons) {
+        if (shown >= static_cast<int>(m_filter.size()))
+            break;
+        if (!source || !source->isVisibleTo(panel))
+            continue;
+        m_filterSource[shown] = source;
+        mirrorButton(m_filter[shown], source, panel, true);
+        if (m_filter[shown]->isHidden())
+            m_filter[shown]->show();
+        ++shown;
+    }
+    for (int i = shown; i < static_cast<int>(m_filter.size()); ++i) {
+        m_filterSource[i] = nullptr;
+        if (!m_filter[i]->isHidden())
+            m_filter[i]->hide();
+    }
+
+    mirrorButton(m_stepDown, c.stepDown, panel, false);
+    mirrorButton(m_stepUp, c.stepUp, panel, false);
+    const QString step = c.stepLabel ? c.stepLabel->text() : QString();
+    if (m_step->text() != step)
+        m_step->setText(step);
+    m_step->setEnabled(usable(c.stepLabel, panel));
+    mirrorCombo(m_agc, c.agcMode, panel);
+    mirrorSlider(m_agcThreshold, c.agcThreshold, panel);
+    mirrorButton(m_agcAuto, c.autoAgcThreshold, panel, true);
+    mirrorButton(m_mute, c.mute, panel, true);
+    mirrorSlider(m_af, c.afGain, panel);
+    // The panel's SQL button is not checkable -- its text says Off, Manual
+    // or Auto -- so the mirror is lit from the squelch mode itself.
+    mirrorButton(m_squelch, c.squelch, panel, true, /*copyChecked=*/false);
+    const bool squelchOn = m_source && m_source->sqlMode() != RxApplet::SqlMode::Off;
+    if (!m_squelch->isCheckable())
+        m_squelch->setCheckable(true);
+    if (m_squelch->isChecked() != squelchOn) {
+        const QSignalBlocker block(m_squelch);
+        m_squelch->setChecked(squelchOn);
+    }
+    mirrorSlider(m_squelchLevel, c.squelchLevel, panel);
+}
+
+// ---- BandBar ----------------------------------------------------------------
 
 BandBar::BandBar(QWidget* parent) : QWidget(parent)
 {
@@ -157,7 +513,8 @@ BandBar::BandBar(QWidget* parent) : QWidget(parent)
     setAccessibleName(tr("Band bar"));
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
-    // One width for every button, from the widest label in the styles' font.
+    // One width for every button, from the widest label in the styles' font
+    // -- the bands', and the longest mode names.
     QFont labelFont = font();
     labelFont.setPixelSize(kLabelPixelSize);
     labelFont.setBold(true);
@@ -170,6 +527,8 @@ BandBar::BandBar(QWidget* parent) : QWidget(parent)
     measure(bandbuttons::kBarAmateur);
     measure(bandbuttons::kBroadcast);
     measure(bandbuttons::kBarUtility);
+    for (const char* mode : {"DSTR", "RADE", "DIGU", "DIGL", "RTTY", "FDVU", "FDVL", "WBFM"})
+        widest = std::max(widest, metrics.horizontalAdvance(QString::fromLatin1(mode)));
     m_buttonWidth = std::max(kMinButtonWidth, widest + kButtonPadding);
 
     auto addButton = [this](const bandbuttons::Entry& e, const QString& style,
@@ -193,35 +552,26 @@ BandBar::BandBar(QWidget* parent) : QWidget(parent)
         });
         m_buttons.append({bandName, btn, group});
     };
-    auto addSeparator = [this] {
-        auto* sep = new QFrame(this);
-        sep->setFrameShape(QFrame::VLine);
-        sep->setFixedSize(kSeparatorWidth, kButtonHeight);
-        sep->setStyleSheet(QStringLiteral("color: #304050;"));
-        m_separators.append(sep);
-    };
-
     for (const auto& e : bandbuttons::kBarAmateur) {
         addButton(e, kAmateurStyle,
                   tr("%1 band (%2 MHz)").arg(QString::fromLatin1(e.label))
                       .arg(e.freqMhz, 0, 'f', 3),
-                  0);
+                  Amateur);
     }
-    addSeparator();
     for (const auto& e : bandbuttons::kBroadcast) {
         addButton(e, kBroadcastStyle,
                   tr("%1 broadcast band (%2 MHz, AM)").arg(QString::fromLatin1(e.label))
                       .arg(e.freqMhz, 0, 'f', 3),
-                  1);
+                  Broadcast);
     }
-    addSeparator();
     for (const auto& e : bandbuttons::kBarUtility)
-        addButton(e, kAmateurStyle, QString::fromLatin1(e.label), 2);
-    m_groupCount = 3;
+        addButton(e, kAmateurStyle, QString::fromLatin1(e.label), Utility);
 
-    const QString gripTip = tr("Drag to make the band bar narrower or wider; "
-                               "the buttons move into rows to fit. "
-                               "Double-click for two rows.");
+    m_quickRx = new QuickRxStrip(this);
+
+    const QString gripTip = tr("Drag to make the bar narrower or wider; the "
+                               "blocks move onto more lines to fit. "
+                               "Double-click to put them back on one line.");
     auto makeGrip = [this, &gripTip](int direction) {
         auto* grip = new BandBarGrip(this);
         grip->setToolTip(gripTip);
@@ -235,14 +585,23 @@ BandBar::BandBar(QWidget* parent) : QWidget(parent)
     m_leftGrip = makeGrip(-1);
     m_rightGrip = makeGrip(+1);
 
+    // The RX Controls panel is read on a timer while the bar shows: its
+    // widgets change from many places (mode, slice, radio), several of them
+    // under signal blockers, so there is no one signal to follow.
+    m_rxPoll.setInterval(250);
+    connect(&m_rxPoll, &QTimer::timeout, this, [this] { syncFromRx(); });
+
     m_contentWidth = std::max(0, AppSettings::instance().value(widthKey(), 0).toInt());
     // A new widget is 100 px wide until its layout says otherwise, which
-    // would put one button on each row and make the bar briefly very tall --
-    // tall enough to stretch the window. Start at the width it wants.
-    const int wanted = m_contentWidth > 0 ? m_contentWidth : defaultContentWidth();
-    resize(std::max(wanted, m_buttonWidth) + 2 * (kGripWidth + kGripGap) + 4, height());
+    // would put every block on a line of its own and make the bar briefly
+    // very tall -- tall enough to stretch the window. Start at the width it
+    // wants.
+    const int wanted = m_contentWidth > 0 ? m_contentWidth : naturalWidth();
+    resize(std::max(wanted, minimumContentWidth()) + 2 * (kGripWidth + kGripGap) + 4, height());
     relayout();
 }
+
+BandBar::~BandBar() = default;
 
 void BandBar::setCurrentFrequencyMhz(double mhz)
 {
@@ -262,6 +621,83 @@ void BandBar::syncChecked()
     }
 }
 
+void BandBar::setQuickRxSource(RxApplet* source)
+{
+    m_rxSource = source;
+    if (m_quickRx)
+        m_quickRx->setSource(source);
+    syncFromRx();
+}
+
+void BandBar::syncFromRx()
+{
+    const RxApplet::QuickControls c =
+        m_rxSource ? m_rxSource->quickControls() : RxApplet::QuickControls{};
+
+    // The mode buttons are the panel's mode list, lit on its current mode.
+    QStringList modes;
+    QString current;
+    if (c.mode) {
+        for (int i = 0; i < c.mode->count(); ++i)
+            modes << c.mode->itemText(i);
+        current = c.mode->currentText();
+    }
+    if (modes != m_modeNames) {
+        rebuildModeButtons(modes);
+        relayout();
+    }
+    const bool modesUsable = usable(c.mode, m_rxSource.data());
+    for (const ModeButton& m : m_modeButtons) {
+        const bool on = m.mode == current;
+        if (m.button->isChecked() != on) {
+            const QSignalBlocker block(m.button);
+            m.button->setChecked(on);
+        }
+        if (m.button->isEnabled() != modesUsable)
+            m.button->setEnabled(modesUsable);
+    }
+
+    if (m_quickRx)
+        m_quickRx->sync();
+}
+
+void BandBar::rebuildModeButtons(const QStringList& modes)
+{
+    for (const ModeButton& m : m_modeButtons) {
+        m.button->hide();
+        m.button->deleteLater();
+    }
+    m_modeButtons.clear();
+    m_modeNames = modes;
+    for (const QString& mode : modes) {
+        auto* btn = new QPushButton(mode, this);
+        btn->setFixedSize(m_buttonWidth, kButtonHeight);
+        btn->setFocusPolicy(Qt::NoFocus);
+        btn->setCheckable(true);
+        btn->setStyleSheet(kModeStyle);
+        const QString tip = tr("%1 mode").arg(mode);
+        btn->setToolTip(tip);
+        btn->setAccessibleName(tip);
+        connect(btn, &QPushButton::clicked, this, [this, mode] { selectMode(mode); });
+        btn->show();
+        m_modeButtons.append({mode, btn});
+    }
+}
+
+void BandBar::selectMode(const QString& mode)
+{
+    // Through the panel's own mode list, so a client-side mode (RADE) is
+    // started the way the panel starts it.
+    if (m_rxSource) {
+        if (QComboBox* combo = m_rxSource->quickControls().mode) {
+            const int index = combo->findText(mode);
+            if (index >= 0)
+                combo->setCurrentIndex(index);
+        }
+    }
+    QTimer::singleShot(0, this, [this] { syncFromRx(); });
+}
+
 void BandBar::setContentWidth(int px)
 {
     m_contentWidth = std::max(0, px);
@@ -274,22 +710,79 @@ void BandBar::resizeEvent(QResizeEvent* event)
     relayout();
 }
 
-int BandBar::groupWidth(int group) const
+void BandBar::showEvent(QShowEvent* event)
 {
-    int count = 0;
-    for (const Button& b : m_buttons)
-        count += b.group == group ? 1 : 0;
-    return count > 0 ? count * m_buttonWidth + (count - 1) * kSpacing : 0;
+    QWidget::showEvent(event);
+    syncFromRx();
+    m_rxPoll.start();
 }
 
-int BandBar::defaultContentWidth() const
+void BandBar::hideEvent(QHideEvent* event)
 {
-    // Two rows: the amateur bands on the first, everything after them on the
-    // second.
-    int rest = 0;
-    for (int g = 1; g < m_groupCount; ++g)
-        rest += groupWidth(g) + (g > 1 ? kGroupGap : 0);
-    return std::max(groupWidth(0), rest);
+    m_rxPoll.stop();
+    QWidget::hideEvent(event);
+}
+
+QVector<BandBar::Block> BandBar::blocks(int contentWidth) const
+{
+    QVector<Block> out;
+    const int buttonWidth = m_buttonWidth;
+    auto addGrid = [&out, contentWidth, buttonWidth](const QVector<QPushButton*>& buttons) {
+        if (buttons.isEmpty())
+            return;
+        const int n = static_cast<int>(buttons.size());
+        auto widthFor = [n, buttonWidth](int rows) {
+            const int cols = (n + rows - 1) / rows;
+            return cols * buttonWidth + (cols - 1) * kSpacing;
+        };
+        // Two rows; more only when two would be wider than the bar.
+        int rows = std::min(kBlockRows, n);
+        while (rows < n && widthFor(rows) > contentWidth)
+            ++rows;
+        Block b;
+        b.buttons = buttons;
+        b.rows = rows;
+        b.cols = (n + rows - 1) / rows;
+        b.width = widthFor(rows);
+        b.height = rows * kButtonHeight + (rows - 1) * kRowSpacing;
+        out.append(b);
+    };
+
+    QVector<QPushButton*> modes;
+    for (const ModeButton& m : m_modeButtons)
+        modes.append(m.button);
+    addGrid(modes);
+    for (int g = Amateur; g <= Utility; ++g) {
+        QVector<QPushButton*> group;
+        for (const Button& b : m_buttons) {
+            if (b.group == g)
+                group.append(b.button);
+        }
+        addGrid(group);
+    }
+    if (m_quickRx) {
+        Block b;
+        b.fixed = m_quickRx;
+        b.width = m_quickRx->width();
+        b.height = m_quickRx->height();
+        out.append(b);
+    }
+    return out;
+}
+
+int BandBar::naturalWidth() const
+{
+    // Every block two rows tall, all on one line.
+    const QVector<Block> all = blocks(std::numeric_limits<int>::max() / 4);
+    int total = 0;
+    for (int i = 0; i < all.size(); ++i)
+        total += all[i].width + (i > 0 ? kGroupGap : 0);
+    return total;
+}
+
+int BandBar::minimumContentWidth() const
+{
+    return std::max(m_buttonWidth, m_quickRx ? m_quickRx->width() : 0);
 }
 
 int BandBar::availableContentWidth() const
@@ -299,76 +792,78 @@ int BandBar::availableContentWidth() const
 
 int BandBar::effectiveContentWidth() const
 {
-    const int wanted = m_contentWidth > 0 ? m_contentWidth : defaultContentWidth();
-    return std::max(m_buttonWidth, std::min(wanted, availableContentWidth()));
+    const int wanted = m_contentWidth > 0 ? m_contentWidth : naturalWidth();
+    return std::max(minimumContentWidth(), std::min(wanted, availableContentWidth()));
 }
 
 void BandBar::relayout()
 {
-    if (m_buttons.isEmpty())
-        return;
     const int contentWidth = effectiveContentWidth();
+    const QVector<Block> all = blocks(contentWidth);
+    if (all.isEmpty())
+        return;
 
-    struct Placed {
-        QWidget* widget;
-        int row;
-        int x;
+    // Blocks into lines: the next block starts a new line when it does not
+    // fit beside the ones before.
+    struct Line {
+        QVector<int> blocks;
+        int width = 0;
+        int height = 0;
     };
-    QVector<Placed> placed;
-    QVector<int> rowWidth{0};
-    int row = 0;
-    int x = 0;
-    auto newRow = [&row, &x, &rowWidth] {
-        ++row;
-        x = 0;
-        rowWidth.append(0);
-    };
-    for (int g = 0; g < m_groupCount; ++g) {
-        if (g > 0) {
-            QFrame* sep = m_separators.value(g - 1);
-            // A group moves to the next row whole when it does not fit
-            // beside the one before; a group wider than a row wraps inside.
-            if (x > 0 && x + kGroupGap + groupWidth(g) > contentWidth) {
-                newRow();
-                if (sep)
-                    sep->hide();
-            } else if (x > 0) {
-                if (sep) {
-                    placed.append({sep, row, x + (kGroupGap - kSeparatorWidth) / 2});
-                    sep->show();
+    QVector<Line> lines(1);
+    for (int i = 0; i < all.size(); ++i) {
+        if (!lines.last().blocks.isEmpty()
+            && lines.last().width + kGroupGap + all[i].width > contentWidth) {
+            lines.append(Line{});
+        }
+        Line& line = lines.last();
+        line.width += (line.blocks.isEmpty() ? 0 : kGroupGap) + all[i].width;
+        line.height = std::max(line.height, all[i].height);
+        line.blocks.append(i);
+    }
+
+    // Each line centred on its own; a separator in every gap.
+    int separatorsUsed = 0;
+    int y = kMarginV;
+    for (const Line& line : lines) {
+        int x = (width() - line.width) / 2;
+        for (int k = 0; k < line.blocks.size(); ++k) {
+            const Block& b = all[line.blocks[k]];
+            if (k > 0) {
+                if (separatorsUsed >= m_separators.size()) {
+                    auto* sep = new QFrame(this);
+                    sep->setFrameShape(QFrame::VLine);
+                    sep->setStyleSheet(QStringLiteral("color: #304050;"));
+                    m_separators.append(sep);
                 }
+                QFrame* sep = m_separators[separatorsUsed++];
+                sep->setGeometry(x + (kGroupGap - kSeparatorWidth) / 2, y, kSeparatorWidth,
+                                 line.height);
+                if (sep->isHidden())
+                    sep->show();
                 x += kGroupGap;
-            } else if (sep) {
-                sep->hide();
             }
-        }
-        bool firstInGroup = true;
-        for (const Button& b : m_buttons) {
-            if (b.group != g)
-                continue;
-            int lead = (x == 0 || firstInGroup) ? 0 : kSpacing;
-            if (x > 0 && x + lead + m_buttonWidth > contentWidth) {
-                newRow();
-                lead = 0;
+            if (b.fixed) {
+                b.fixed->move(x, y);
+            } else {
+                for (int j = 0; j < b.buttons.size(); ++j) {
+                    const int row = j / b.cols;
+                    const int col = j % b.cols;
+                    b.buttons[j]->move(x + col * (m_buttonWidth + kSpacing),
+                                       y + row * (kButtonHeight + kRowSpacing));
+                }
             }
-            x += lead;
-            placed.append({b.button, row, x});
-            x += m_buttonWidth;
-            rowWidth[row] = x;
-            firstInGroup = false;
+            x += b.width;
         }
+        y += line.height + kLineSpacing;
     }
-
-    const int rows = static_cast<int>(rowWidth.size());
-    const int barHeight = 2 * kMarginV + rows * kButtonHeight + (rows - 1) * kRowSpacing;
-    // Each row centred on its own.
-    for (const Placed& p : placed) {
-        const int left = (width() - rowWidth[p.row]) / 2;
-        const int y = kMarginV + p.row * (kButtonHeight + kRowSpacing);
-        p.widget->move(left + p.x, y);
+    for (int i = separatorsUsed; i < m_separators.size(); ++i) {
+        if (!m_separators[i]->isHidden())
+            m_separators[i]->hide();
     }
+    const int barHeight = y - kLineSpacing + kMarginV;
 
-    // The grips mark the width the buttons flow in.
+    // The grips mark the width the blocks flow in.
     const int contentLeft = (width() - contentWidth) / 2;
     const int gripHeight = barHeight - 2 * kMarginV;
     const int maxGripX = std::max(0, width() - kGripWidth);
@@ -391,8 +886,8 @@ void BandBar::dragWidth(int dx, int direction)
     // Centred, so the far side moves too: a grip follows the mouse when the
     // width changes by twice the distance moved.
     const int wanted = m_dragStartWidth + 2 * dx * direction;
-    m_contentWidth = std::clamp(wanted, m_buttonWidth,
-                                std::max(m_buttonWidth, availableContentWidth()));
+    m_contentWidth = std::clamp(wanted, minimumContentWidth(),
+                                std::max(minimumContentWidth(), availableContentWidth()));
     relayout();
 }
 

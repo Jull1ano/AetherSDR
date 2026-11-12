@@ -94,6 +94,12 @@ public:
     // (0 = none, 50 = half as tall; at most 90). Default 50. Same life cycle.
     static int panFlattenPct();
     static void setPanFlattenPct(int pct);
+    // brick3-angelia: the receive-audio cushion, ms (RadioCapabilities::
+    // receiveAudioCushionMs): how much audio is queued ahead of the PC speaker.
+    // Default 100, the value that cured the speaker ticks; 10..200. Live
+    // ("anan" "frontend.set" {rxAudioCushionMs}) and read at connect.
+    static int rxAudioCushionMs();
+    static void setRxAudioCushionMs(int ms);
 
     // The DDC0 rates a session may start at, for a UI offering the choice.
     //

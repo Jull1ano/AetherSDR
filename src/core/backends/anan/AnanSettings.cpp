@@ -41,6 +41,10 @@ constexpr int kMaxPanBallisticsMs = 5000;
 constexpr const char* kFieldPanFlattenPct     = "panFlattenPct";      // brick3-angelia
 constexpr int kDefaultPanFlattenPct = 50;
 constexpr int kMaxPanFlattenPct = 90;
+constexpr const char* kFieldRxAudioCushionMs  = "rxAudioCushionMs";   // brick3-angelia
+constexpr int kDefaultRxAudioCushionMs = 100;
+constexpr int kMinRxAudioCushionMs = 10;
+constexpr int kMaxRxAudioCushionMs = 200;
 
 }  // namespace
 
@@ -267,6 +271,22 @@ void AnanSettings::setPanFlattenPct(int pct)
 {
     QJsonObject obj = readObj();
     obj[QLatin1String(kFieldPanFlattenPct)] = std::clamp(pct, 0, kMaxPanFlattenPct);
+    writeObj(obj);
+}
+
+int AnanSettings::rxAudioCushionMs()
+{
+    const int v = readObj().value(QLatin1String(kFieldRxAudioCushionMs))
+                      .toInt(kDefaultRxAudioCushionMs);
+    return (v >= kMinRxAudioCushionMs && v <= kMaxRxAudioCushionMs) ? v
+                                                                    : kDefaultRxAudioCushionMs;
+}
+
+void AnanSettings::setRxAudioCushionMs(int ms)
+{
+    QJsonObject obj = readObj();
+    obj[QLatin1String(kFieldRxAudioCushionMs)] =
+        std::clamp(ms, kMinRxAudioCushionMs, kMaxRxAudioCushionMs);
     writeObj(obj);
 }
 

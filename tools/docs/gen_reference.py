@@ -668,13 +668,29 @@ def parse_shortcuts():
         mm = re.fullmatch(r'QString\s*\(\s*"mode_%1"\s*\)\s*\.arg\(\s*m\.toLower\(\)\s*\)',
                           id_expr)
         if mm:
-            if name_expr.strip() != "m" or key_expr.strip() not in ("QKeySequence()", "{}"):
+            key_e = re.sub(r"\s+", "", key_expr)
+            if name_expr.strip() != "m" or key_e not in (
+                    "QKeySequence()", "{}", "QKeySequence(modeDefaultKey(m))"):
                 raise ParseError(f"{where}: the mode shortcut loop changed shape")
+            # brick3-angelia: one-letter keys for some modes, from the
+            # kModeDefaultKeys table; those work with shortcuts switched off.
+            mode_keys = {}
+            if key_e == "QKeySequence(modeDefaultKey(m))":
+                for row in string_rows(src, "kModeDefaultKeys"):
+                    if not isinstance(row, list) or len(row) != 2:
+                        raise ParseError(f"{where}: kModeDefaultKeys rows must be "
+                                         "{mode, key}")
+                    mode_keys[row[0]] = row[1]
+                unknown_modes = sorted(set(mode_keys) - set(modes))
+                if unknown_modes:
+                    raise ParseError(f"{where}: kModeDefaultKeys names modes that "
+                                     f"modeActionModes() lacks: {unknown_modes}")
             for mode in modes:
                 conds = common["conds"] + (gate_conds if mode in gated else ())
+                key = mode_keys.get(mode, "")
                 entries.append((pos, dict(common, id=f"mode_{mode.lower()}",
-                                          name=mode, key="", mode=True,
-                                          conds=conds)))
+                                          name=mode, key=key, mode=True,
+                                          always=bool(key), conds=conds)))
             continue
         ident = resolve(id_expr, where, "action id")
         name = resolve(name_expr, where, "display name")
@@ -707,6 +723,16 @@ def parse_shortcuts():
 
     entries.sort(key=lambda e: e[0])
     actions = [e for _, e in entries]
+    # brick3-angelia: actions that work with the Keyboard Shortcuts switch
+    # off (ShortcutManager::setAlwaysOn with a literal id).
+    always_ids = set(re.findall(
+        r'\bsetAlwaysOn\s*\(\s*(?:QStringLiteral\s*\(\s*)?"(\w+)"\s*\)?\s*,\s*true\s*\)',
+        src.code))
+    by_id = {a["id"]: a for a in actions}
+    for ident in sorted(always_ids):
+        if ident not in by_id:
+            raise ParseError(f"{src.rel}: setAlwaysOn names unknown action {ident!r}")
+        by_id[ident]["always"] = True
     ids = [a["id"] for a in actions]
     dups = sorted({i for i in ids if ids.count(i) > 1})
     if dups:
@@ -754,6 +780,8 @@ def render_shortcuts(actions, categories, sources) -> str:
             if a["window"]:
                 notes.append("Window management: works with keyboard "
                              "shortcuts switched off")
+            if a.get("always"):
+                notes.append("Works with keyboard shortcuts switched off")
             if a["conds"]:
                 notes.append("Only in builds with " + join_conditions(a["conds"]))
             # Notes are fixed prose plus code spans; nothing here needs escaping.

@@ -52,13 +52,13 @@ These are the actions you can bind in **Settings → Configure Shortcuts...**, w
 
 | Action | ID | Default key | Notes |
 |---|---|---|---|
-| USB | `mode_usb` |   |   |
-| LSB | `mode_lsb` |   |   |
+| USB | `mode_usb` | `U` | Works with keyboard shortcuts switched off |
+| LSB | `mode_lsb` | `L` | Works with keyboard shortcuts switched off |
 | CW | `mode_cw` |   |   |
 | CWL | `mode_cwl` |   |   |
-| AM | `mode_am` |   |   |
+| AM | `mode_am` | `A` | Works with keyboard shortcuts switched off |
 | SAM | `mode_sam` |   |   |
-| FM | `mode_fm` |   |   |
+| FM | `mode_fm` | `F` | Works with keyboard shortcuts switched off |
 | NFM | `mode_nfm` |   |   |
 | DFM | `mode_dfm` |   |   |
 | DSTR | `mode_dstr` |   | Only in builds with `AETHER_ENABLE_DIGITAL_VOICE_HELPER` |
@@ -106,7 +106,7 @@ These are the actions you can bind in **Settings → Configure Shortcuts...**, w
 | AF Gain Down | `af_gain_down` | `Down` |   |
 | Mute Toggle | `mute_toggle` |   |   |
 | Mute All Slices | `mute_all_slices_toggle` |   |   |
-| PC Audio Toggle (mute) | `pc_audio_toggle` | `M` |   |
+| PC Audio Toggle (mute) | `pc_audio_toggle` | `M` | Works with keyboard shortcuts switched off |
 | Master Mute Toggle | `master_mute_toggle` |   |   |
 | Master Volume Up | `master_volume_up` |   | Repeats while held |
 | Master Volume Down | `master_volume_down` |   | Repeats while held |
@@ -138,7 +138,7 @@ These are the actions you can bind in **Settings → Configure Shortcuts...**, w
 |---|---|---|---|
 | Step Size Up | `step_up` | `]` |   |
 | Step Size Down | `step_down` | `[` |   |
-| Tune Lock Toggle | `lock_toggle` | `L` |   |
+| Tune Lock Toggle | `lock_toggle` | `Shift+L` |   |
 | Center Lock Active Slice | `center_lock_toggle` |   |   |
 
 ## DSP
@@ -183,6 +183,7 @@ These are the actions you can bind in **Settings → Configure Shortcuts...**, w
 | Minimize Active Window | `window_minimize` | macOS: `Ctrl+M`; other: none | Window management: works with keyboard shortcuts switched off |
 | Toggle Active Window Full Screen | `window_fullscreen` | macOS: `Ctrl+Meta+F`; other: `F11` | Window management: works with keyboard shortcuts switched off |
 | Minimal Mode Toggle | `minimal_mode` |   |   |
+| Side Panel Show/Hide | `side_panel_toggle` | `F9` | Works with keyboard shortcuts switched off |
 
 ## RIT/XIT
 

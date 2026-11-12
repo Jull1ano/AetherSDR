@@ -3228,6 +3228,24 @@ void RxApplet::stepFilterWidth(int steps)
     applyFilterPreset(stepWidths[next]);
 }
 
+RxApplet::QuickControls RxApplet::quickControls() const
+{
+    QuickControls c;
+    c.mode = m_modeCombo;
+    c.filterButtons = m_filterBtns;
+    c.stepDown = m_stepDown;
+    c.stepLabel = m_stepLabel;
+    c.stepUp = m_stepUp;
+    c.agcMode = m_agcCombo;
+    c.agcThreshold = m_agcTSlider;
+    c.autoAgcThreshold = m_autoAgcTButton;
+    c.mute = m_muteBtn;
+    c.afGain = m_afSlider;
+    c.squelch = m_sqlBtn;
+    c.squelchLevel = m_sqlSlider;
+    return c;
+}
+
 void RxApplet::updateFilterButtons()
 {
     if (!m_slice) return;

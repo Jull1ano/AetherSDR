@@ -555,7 +555,9 @@ RadioCapabilities AnanBackend::capabilities() const
     // brick3-angelia: audio leaves the DSP in clumps, as the network delivers
     // IQ (gaps up to 90 ms on a Brick3). With no reserve the speaker underran
     // 2322 times a minute; 100 ms covers the longest gap seen.
-    c.receiveAudioCushionMs = 100;
+    // brick3-angelia: the operator's (AnanSettings::rxAudioCushionMs()),
+    // default 100 ms -- the value that cured the speaker ticks.
+    c.receiveAudioCushionMs = m_rxAudioCushionMs;
     // brick3-angelia: measured on the radio -- 40 discovery requests sent
     // mid-stream gave 43 sequence gaps of ~50 IQ packets each.
     c.quietDiscoveryWhileConnected = RadioCapabilities::QuietDiscoveryWhileConnected{};
@@ -968,6 +970,10 @@ void AnanBackend::connectRadio(const RadioConnectRequest& request)
     // ...and Flatten, 0 (none) for a connect that never populated it.
     m_panFlattenPct = std::clamp(
         request.params.value(QStringLiteral("anan.panFlattenPct"), 0).toInt(), 0, 90);
+    // ...and the receive-audio cushion, 100 ms for a connect that never
+    // populated it (the value before it was a setting).
+    m_rxAudioCushionMs = std::clamp(
+        request.params.value(QStringLiteral("anan.rxAudioCushionMs"), 100).toInt(), 10, 200);
     // applyRestoredState() seeds both ADC values before this connect.
     m_attenuationDb = m_pendingParams.rx1AdcIndex == 1
         ? m_pendingParams.adc1AttenuationDb
@@ -2245,6 +2251,16 @@ void AnanBackend::invokeExtension(const QString& ns, const QString& verb,
         // and then invokes this; a caller that only invokes it gets a change
         // that reverts at the next connect, which reads AnanSettings.
         const QVariantMap fields = arg.toMap();
+        if (fields.contains(QStringLiteral("rxAudioCushionMs"))) {
+            // brick3-angelia: the receive-audio cushion, live -- MainWindow
+            // re-reads it from the capabilities on this edge.
+            const int cushion = std::clamp(
+                fields.value(QStringLiteral("rxAudioCushionMs")).toInt(), 10, 200);
+            if (cushion != m_rxAudioCushionMs) {
+                m_rxAudioCushionMs = cushion;
+                emit capabilitiesChanged();
+            }
+        }
         if (fields.contains(QStringLiteral("bandFiltersEnabled"))) {
             m_pendingParams.bandFiltersEnabled =
                 fields.value(QStringLiteral("bandFiltersEnabled")).toBool();

@@ -5252,6 +5252,48 @@ QWidget* RadioSetupDialog::buildAnanFrontEndTab()
 
     vbox->addWidget(audioGroup);
 
+    // brick3-angelia: how much receive audio is queued ahead of this
+    // computer's speaker. Less is less delay; too little and the speaker
+    // runs dry and ticks. 100 ms is the value that cured the ticks.
+    auto* pcAudioGroup = new QGroupBox("This Computer's Speaker");
+    themed(pcAudioGroup, kGroup);
+    auto* pvb = new QVBoxLayout(pcAudioGroup);
+    pvb->setSpacing(6);
+    auto* cushionRow = new QHBoxLayout;
+    auto* cushionLabel = new QLabel("Receive audio cushion:");
+    themed(cushionLabel, kLabel);
+    auto* cushionSpin = new QSpinBox;
+    cushionSpin->setObjectName(QStringLiteral("ananRxAudioCushion"));
+    cushionSpin->setRange(10, 200);
+    cushionSpin->setSingleStep(10);
+    cushionSpin->setSuffix(QStringLiteral(" ms"));
+    cushionSpin->setAccessibleName(QStringLiteral("Receive audio cushion"));
+    cushionSpin->setAccessibleDescription(QStringLiteral(
+        "How much receive audio is queued ahead of this computer's speaker, in "
+        "milliseconds. Less means less delay; too little and the audio ticks. "
+        "100 is the default. Takes effect at once."));
+    cushionSpin->setToolTip(QStringLiteral(
+        "How much receive audio is queued ahead of this computer's speaker.\n"
+        "Less = less delay. Too little and the speaker runs dry: ticks.\n"
+        "100 ms is the default (the value that cured the ticks); go back\n"
+        "to it if you hear any. Takes effect at once."));
+    cushionRow->addWidget(cushionLabel);
+    cushionRow->addWidget(cushionSpin);
+    cushionRow->addStretch(1);
+    pvb->addLayout(cushionRow);
+    auto* cushionHint = new QLabel(QStringLiteral(
+        "Lower it for less audio delay, 10 ms at a time. If you hear ticks, go back up; "
+        "100 ms is the default."));
+    themed(cushionHint, kHint);
+    cushionHint->setWordWrap(true);
+    pvb->addWidget(cushionHint);
+    connect(cushionSpin, QOverload<int>::of(&QSpinBox::valueChanged), this,
+            [pushLive](int ms) {
+        AnanSettings::setRxAudioCushionMs(ms);
+        pushLive({{QStringLiteral("rxAudioCushionMs"), ms}});
+    });
+    vbox->addWidget(pcAudioGroup);
+
     // Re-read AnanSettings into every control. Needed on show as well as on a
     // connection change: these settings are global to this radio family and
     // another surface (or another profile load) can have moved them while this
@@ -5259,13 +5301,13 @@ QWidget* RadioSetupDialog::buildAnanFrontEndTab()
     // combos have reseeds.
     m_ananFrontEndReseed = [feRateCombo, feAdcCombo, feDitherChk, feRandomChk, feBankCombo,
                             feBypass0Chk, feBypass1Chk, speakerAudioChk, ampMuteChk,
-                            syncBypassEnabled] {
+                            cushionSpin, syncBypassEnabled] {
         // Blocked while seeding: every one of these controls persists on change,
         // so an unblocked setCurrentIndex() would write back the value it just
         // read and, for the live ones, push it to the radio.
         const QSignalBlocker b1(feRateCombo), b2(feAdcCombo), b3(feDitherChk), b4(feRandomChk),
                              b5(feBankCombo), b6(feBypass0Chk), b7(feBypass1Chk),
-                             b8(speakerAudioChk), b9(ampMuteChk);
+                             b8(speakerAudioChk), b9(ampMuteChk), b10(cushionSpin);
         const int rateIdx = feRateCombo->findData(AnanSettings::ddc0RateKsps());
         feRateCombo->setCurrentIndex(rateIdx >= 0 ? rateIdx : 0);
         const int adcIdx = feAdcCombo->findData(AnanSettings::ddc0AdcIndex());
@@ -5280,6 +5322,7 @@ QWidget* RadioSetupDialog::buildAnanFrontEndTab()
         syncBypassEnabled(followTuned);
         speakerAudioChk->setChecked(AnanSettings::speakerAudioEnabled());
         ampMuteChk->setChecked(AnanSettings::speakerAmpMuted());
+        cushionSpin->setValue(AnanSettings::rxAudioCushionMs());
     };
     m_ananFrontEndReseed();
 

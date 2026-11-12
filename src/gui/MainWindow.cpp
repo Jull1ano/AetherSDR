@@ -9210,6 +9210,14 @@ void MainWindow::rebindActiveFrequencyDisplays()
                               [this](bool) { refreshTitleDspStrip(); });
     showActiveSliceFrequency(s->frequency());
     refreshTitleDspStrip();
+    // The band bars' mode buttons and quick RX controls read the RX Controls
+    // panel, which follows the active slice; point late-built bars at it.
+    if (m_panStack && m_appletPanel) {
+        for (auto* applet : m_panStack->allApplets()) {
+            if (auto* bar = applet ? applet->bandBar() : nullptr)
+                bar->setQuickRxSource(m_appletPanel->rxApplet());
+        }
+    }
 }
 
 void MainWindow::showActiveSliceFrequency(double mhz)

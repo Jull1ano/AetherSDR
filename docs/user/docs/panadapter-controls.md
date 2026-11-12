@@ -26,6 +26,7 @@ The panadapter is the main display: the FFT spectrum on top and the scrolling wa
 - **View → Single-Click to Tune** (off by default) makes a single click tune instead of a double-click.
 - Clicking an empty part of a panadapter that has no slice on it adds a new slice there.
 - Dragging a slice to the edge of the pan keeps panning the display.
+- Dragging an edge of the passband changes the receive filter. In **AM**, **SAM** and the **FM** modes the passband stays symmetric about the carrier: dragging either edge moves both. Hold **Shift** to drag one edge on its own.
 - On a trackpad, vertical scrolling tunes, sideways swipes are ignored, and pinch-to-zoom changes the span where the system delivers a zoom gesture.
 - If the wheel tunes the wrong way for your mouse or trackball, turn on **Radio Setup → Appearance & Behavior → Reverse mouse-wheel tuning direction**.
 - Dragging any slider shows its value in a small popup.
@@ -194,7 +195,7 @@ The applet panel holds the radio controls (S-Meter, RX, TX, Phone, P/CW, EQ and 
 
 Use the icons at the right of the title bar:
 
-- **Dock left** / **Dock right** — put the panel on that side of the panadapters. Clicking the side it is already on hides it.
+- **Dock left** / **Dock right** — put the panel on that side of the panadapters. Clicking the side it is already on hides it. **F9** hides and shows it too, even with keyboard shortcuts switched off.
 - **Pop out** — float the panel in its own window (also **Ctrl+Shift+S**). Popped-out applets have a pin for always-on-top.
 
 The dock side is remembered when you restart AetherSDR.

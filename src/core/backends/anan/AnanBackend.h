@@ -623,6 +623,9 @@ private:
     int m_panAttackMs = 0;
     int m_panDecayMs = 0;
     int m_panFlattenPct = 0;   // brick3-angelia: Flatten, % (AnanPanView.h)
+    // brick3-angelia: the receive-audio cushion this radio declares, ms
+    // (AnanSettings::rxAudioCushionMs()); 100 until a connect says otherwise.
+    int m_rxAudioCushionMs = 100;
 
     // The receiver audio stage as last set; emitSliceState() publishes these.
     // Retained across rate changes and reconnects (like the blanker and AGC).

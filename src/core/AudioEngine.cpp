@@ -982,8 +982,17 @@ void AudioEngine::setReceiveCushionFloorMs(int ms)
     if ((previous > 0) != (floor > 0) && m_audioSink) {
         stopRxStream();
         startRxStream();
+        return;
     }
 #endif
+    // brick3-angelia: a new cushion while playing (the operator's setting,
+    // AnanSettings::rxAudioCushionMs()). What is already queued sets the delay
+    // until it runs out, so a smaller cushion would not shorten it: restart
+    // the stream empty to collect the new one -- a brief gap in the audio.
+    if (previous > 0 && floor > 0 && m_audioSink) {
+        stopRxStream();
+        startRxStream();
+    }
 }
 
 void AudioEngine::resetReceivePresentationAudioBuffers()

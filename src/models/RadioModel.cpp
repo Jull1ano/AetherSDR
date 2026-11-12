@@ -764,6 +764,8 @@ static void populateFamilyParams(RadioConnectRequest& req, const QString& family
                           anan::AnanSettings::panDecayMs());
         req.params.insert(QStringLiteral("anan.panFlattenPct"),
                           anan::AnanSettings::panFlattenPct());
+        req.params.insert(QStringLiteral("anan.rxAudioCushionMs"),
+                          anan::AnanSettings::rxAudioCushionMs());
         return;
     }
 

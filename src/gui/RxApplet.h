@@ -94,6 +94,26 @@ public:
     // mode-correct edge geometry.
     void stepFilterWidth(int steps);
 
+    // brick3-angelia: the controls the band bar's quick RX strip mirrors
+    // (BandBar.cpp). The strip shows their state and clicks or sets THEM, so
+    // every rule they carry -- per-mode presets, custom edges, AGC and
+    // squelch availability -- stays here, and works with this panel hidden.
+    struct QuickControls {
+        QComboBox* mode{nullptr};   // the band bar shows its items as buttons
+        QVector<QPushButton*> filterButtons;
+        QPushButton* stepDown{nullptr};
+        QLabel* stepLabel{nullptr};
+        QPushButton* stepUp{nullptr};
+        QComboBox* agcMode{nullptr};
+        QSlider* agcThreshold{nullptr};
+        QPushButton* autoAgcThreshold{nullptr};
+        QPushButton* mute{nullptr};
+        QSlider* afGain{nullptr};
+        QPushButton* squelch{nullptr};
+        QSlider* squelchLevel{nullptr};
+    };
+    [[nodiscard]] QuickControls quickControls() const;
+
     // Connect to transmit model for QSK (break_in) indicator.
     void setTransmitModel(class TransmitModel* txModel);
     void setRadioModel(class RadioModel* radioModel);
