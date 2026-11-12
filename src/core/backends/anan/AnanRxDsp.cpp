@@ -179,8 +179,11 @@ bool AnanRxDsp::installRebuiltChannel(RebuildResult result)
         // The build failed and the old channel carries on. Notch and tune
         // changes made while it ran only reached the list (canPushToChannel()
         // was false): give them to the channel that is still playing.
-        if (m_channel)
+        if (m_channel) {
             pushAllNotches(*m_channel);
+            // Likewise a squelch change: processIqBlock() pushes it.
+            m_squelchPending = true;
+        }
         return false;
     }
     installChannel(std::move(result));

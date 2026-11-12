@@ -630,6 +630,10 @@ private:
     static constexpr int kDefaultSquelchLevel = 20;
     bool m_squelchOn = false;
     int m_squelchLevel = kDefaultSquelchLevel;
+    // True when the next emitSliceState() must carry the pair: at the start
+    // of a session, after a restore, a mode change or a squelch change.
+    // Cleared by that emit, so tuning does not republish it.
+    bool m_squelchEchoDue = true;
     // The level squelch gates raw dBFS at the ADC, after the step
     // attenuator; the S-meter and the panadapter add the attenuation back.
     // Taking it off the threshold keeps the gate where the operator set it

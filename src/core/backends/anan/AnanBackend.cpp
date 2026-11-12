@@ -319,6 +319,9 @@ AnanBackend::AnanBackend(QObject* parent)
             // must not ride into its first published voltage.
             resetSupplyRailWindow();
         }
+        // A new session may have a fresh slice model: it learns the squelch
+        // from this emit.
+        m_squelchEchoDue = true;
         emitSliceState();
         emitPanState();
         // A rate change suppresses connected(), but a page opened during
@@ -804,6 +807,7 @@ void AnanBackend::applyRestoredState(const RestoredRadioState& state)
         m_squelchOn = squelch.value(QStringLiteral("on")).toBool(false);
         const int level = squelch.value(QStringLiteral("level")).toInt(-1);
         m_squelchLevel = level >= 0 && level <= 100 ? level : kDefaultSquelchLevel;
+        m_squelchEchoDue = true;
     }
     // brick3-angelia: the zoom inside that rate, unconditional like the rest.
     {
@@ -1336,6 +1340,8 @@ void AnanBackend::setSliceMode(int sliceId, const QString& mode)
     }
     m_mode = mode;
     pushModeFilterShift();   // HERMES §16.7: mode changes re-push the passband, every time
+    // The squelch is per mode family: say again what the receiver holds.
+    m_squelchEchoDue = true;
     emitSliceState();
     emit operatingStateChanged();   // Tuning capture; a mode change is discrete
 }
@@ -1488,6 +1494,7 @@ void AnanBackend::setSliceSquelch(int sliceId, bool on, int level)
     m_squelchOn = on;
     m_squelchLevel = bounded;
     pushSquelch();
+    m_squelchEchoDue = true;
     emitSliceState();
     if (changed)
         emit operatingStateChanged();   // kept per radio ("squelch" extension)
@@ -2712,8 +2719,15 @@ void AnanBackend::emitSliceState()
     // brick3-angelia: the squelch pair as held and pushed to the chain, so
     // the SQL button and slider show what the receiver runs. Safe to echo:
     // SliceModel::applyChanges() does not turn it back into a command.
-    d.squelchOn = m_squelchOn;
-    d.squelchLevel = m_squelchLevel;
+    // Only when it may be news (m_squelchEchoDue): the slice emits
+    // squelchChanged for every delta that carries the pair, and the SQL
+    // controls restyle on each one, which a drag-tune -- one emit per mouse
+    // move -- would pay hundreds of times a second.
+    if (m_squelchEchoDue) {
+        d.squelchOn = m_squelchOn;
+        d.squelchLevel = m_squelchLevel;
+        m_squelchEchoDue = false;
+    }
     // Without this, RadioModel::sliceChanged's handler never assigns the
     // slice a panId (SliceDelta::panId is std::optional and SliceModel::
     // applyChanges() only touches it when set) -- the slice materialised by

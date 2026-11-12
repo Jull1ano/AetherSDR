@@ -6,9 +6,10 @@
 //      carrier brackets on every LNA row he ran (+20, +8, -4, -12).
 //   2. Each backend's RadioCapabilities::squelchLevelScale: Flex -160 + 1*L in
 //      every mode with Auto SQL; HL2 its exact pan-axis map in amsq's modes
-//      only, without Auto SQL; an unidentified Icom, demo, ANAN and RTL keep
-//      Flex's scale (the IC-7300MK2's measured map is in
-//      icom_control_profile_test, #6180).
+//      only, without Auto SQL; an unidentified Icom and demo keep Flex's
+//      scale (the IC-7300MK2's measured map is in icom_control_profile_test,
+//      #6180); the ANAN publishes amsq's map as its S-meter reads it, not
+//      comparable with the pan (brick3-angelia); RTL has its own.
 //   3. The line: a carrier exactly at the amsq gate reads on the HL2 pan at
 //      the record's threshold, at any LNA gain. Flex's line and Auto SQL level
 //      are what the old -160 + level code produced.

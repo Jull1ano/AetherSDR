@@ -932,6 +932,16 @@ void RadioCertification::stageSquelchScale(const Options& o)
                QString(), ref);
         return;
     }
+    if (!scale->spectrumComparable) {
+        // brick3-angelia: a gate declared not comparable with the display
+        // (squelchScaleForMode() gives no line for it) has no line to judge.
+        record(id, title, QJsonObject{{QStringLiteral("published"), true},
+                                      {QStringLiteral("spectrumComparable"), false}},
+               QStringLiteral("The scale is declared not comparable with the panadapter, "
+                              "so no SQL line is drawn. Nothing to check."),
+               QString(), ref);
+        return;
+    }
     QString mode;
     for (const QString& candidate : {QStringLiteral("USB"), QStringLiteral("LSB"),
                                      QStringLiteral("AM"), QStringLiteral("CW")}) {
