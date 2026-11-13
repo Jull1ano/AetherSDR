@@ -103,9 +103,12 @@ constexpr int kGripGap = 4;           // between a grip and the blocks
 constexpr int kQuickRowY1 = kButtonHeight + kRowSpacing;
 constexpr int kQuickRxHeight = 2 * kButtonHeight + kRowSpacing;
 constexpr int kFilterButtonWidth = 40;
-constexpr int kQuickColA = 3 * kFilterButtonWidth + 2 * kSpacing + 8;   // 132
-constexpr int kQuickColB = kQuickColA + 102 + 8;                        // 242
-constexpr int kQuickRxWidth = kQuickColB + 196;                         // 438
+constexpr int kFilterSlots = 8;       // SSB has eight presets (brick3-angelia)
+constexpr int kFilterCols = 4;        // two rows of four
+constexpr int kQuickColA = kFilterCols * kFilterButtonWidth
+                           + (kFilterCols - 1) * kSpacing + 8;          // 174
+constexpr int kQuickColB = kQuickColA + 102 + 8;                        // 284
+constexpr int kQuickRxWidth = kQuickColB + 196;                         // 480
 
 // Not "BandBarWidth", the key of the earlier bar of bands alone: a width
 // dragged there would fold this wider bar onto three lines.
@@ -316,8 +319,8 @@ private:
     QSlider* makeSlider(const QRect& at, const QString& name);
 
     QPointer<RxApplet> m_source;
-    std::array<QPushButton*, 6> m_filter{};
-    std::array<QPointer<QPushButton>, 6> m_filterSource;
+    std::array<QPushButton*, kFilterSlots> m_filter{};
+    std::array<QPointer<QPushButton>, kFilterSlots> m_filterSource;
     QPushButton* m_stepDown{nullptr};
     QLabel* m_step{nullptr};
     QPushButton* m_stepUp{nullptr};
@@ -335,9 +338,10 @@ QuickRxStrip::QuickRxStrip(QWidget* parent) : QWidget(parent)
     setObjectName(QStringLiteral("bandBarQuickRx"));
     setFixedSize(kQuickRxWidth, kQuickRxHeight);
 
-    // Filter presets: two rows of three.
-    for (int i = 0; i < 6; ++i) {
-        const QRect at((i % 3) * (kFilterButtonWidth + kSpacing), i < 3 ? 0 : kQuickRowY1,
+    // Filter presets: two rows of four.
+    for (int i = 0; i < kFilterSlots; ++i) {
+        const QRect at((i % kFilterCols) * (kFilterButtonWidth + kSpacing),
+                       i < kFilterCols ? 0 : kQuickRowY1,
                        kFilterButtonWidth, kButtonHeight);
         m_filter[i] = makeButton(at, QString(), barText("Filter width"));
         m_filter[i]->setCheckable(true);
@@ -460,7 +464,7 @@ void QuickRxStrip::sync()
     const RxApplet::QuickControls c = controls();
     const QWidget* panel = m_source.data();
 
-    // The presets the panel shows, at most six.
+    // The presets the panel shows, at most eight.
     int shown = 0;
     for (QPushButton* source : c.filterButtons) {
         if (shown >= static_cast<int>(m_filter.size()))

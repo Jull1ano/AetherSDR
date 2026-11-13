@@ -129,7 +129,9 @@ QVector<int> widthsForMode(const QString& mode, const ReceiveFilterControl* cont
 const QVector<int>& widthsForMode(const QString& mode)
 {
     // From docs/data/vfo_mode_filters.csv — 8 presets per mode, 4x2 grid
-    static const QVector<int> usb{1800, 2100, 2400, 2700, 2900, 3300, 4000, 6000};
+    // brick3-angelia: SSB tops out at 3.6K and 4K (was 4K and 6K), so the
+    // RX applet's eight and the VFO flag's eight are the same ladder.
+    static const QVector<int> usb{1800, 2100, 2400, 2700, 2900, 3300, 3600, 4000};
     static const QVector<int> am {5600, 6000, 8000, 10000, 12000, 14000, 16000, 20000};
     static const QVector<int> cw {50, 100, 250, 400, 500, 600, 800, 1000};
     static const QVector<int> dig{100, 300, 600, 1000, 1500, 2000, 3000, 6000};

@@ -243,9 +243,10 @@ struct ModeSettings {
 
 static const ModeSettings& modeSettingsFor(const QString& mode)
 {
-    // USB / LSB (default) — first 6 of VfoWidget's 8 presets
+    // USB / LSB (default) — all 8 of VfoWidget's presets (brick3-angelia:
+    // 3.6K and 4K asked for beside the six), three per row
     static const ModeSettings ssbSettings{
-        {1800, 2100, 2400, 2700, 2900, 3300},
+        {1800, 2100, 2400, 2700, 2900, 3300, 3600, 4000},
         {1, 10, 50, 100, 500, 1000, 2000, 3000}
     };
     // AM / SAM — double-sideband: width split ±half around carrier
@@ -284,6 +285,13 @@ static const ModeSettings& modeSettingsFor(const QString& mode)
     }
     if (mode.startsWith("FDV"))          return digSettings;  // FreeDV digital voice
     return ssbSettings;  // fallback for unknown modes
+}
+
+// How many preset buttons the applet shows for a mode: six, or the mode's
+// whole default ladder where that is longer (SSB has eight).
+static int maxRxFilterButtons(const QString& mode)
+{
+    return std::max(6, static_cast<int>(modeSettingsFor(mode).filterWidths.size()));
 }
 
 // Small checkable button used throughout the applet.
@@ -3251,8 +3259,8 @@ void RxApplet::updateFilterButtons()
     if (!m_slice) return;
 
     // Reload presets from AppSettings in case VfoWidget changed them.
-    // RxApplet shows at most 6 (first 6 of the shared preset list).
-    static constexpr int kMaxRxFilters = 6;
+    // RxApplet shows the first 6 of the shared preset list (all 8 for SSB).
+    const int kMaxRxFilters = maxRxFilterButtons(m_slice->mode());
     const QString key = QStringLiteral("FilterPresets_%1").arg(m_slice->mode());
     const QString saved = AppSettings::instance().value(key, "").toString();
     if (m_radioFilterWidths.isEmpty() && !saved.isEmpty()
@@ -3362,9 +3370,9 @@ void RxApplet::updateModeSettings(const QString& mode)
     const bool isFM = (mode == "FM" || mode == "NFM" || mode == "FMN" || mode == "DFM");
 
     // Load custom filter presets from AppSettings, fall back to defaults.
-    // RxApplet shows at most 6 (first 6 of VfoWidget's 8).
+    // RxApplet shows the first 6 of VfoWidget's 8 (all 8 for SSB).
     // Storage format mirrors VfoWidget — "width" or "lo:hi" entries (#2259).
-    static constexpr int kMaxRxFilters = 6;
+    const int kMaxRxFilters = maxRxFilterButtons(mode);
     QString key = QStringLiteral("FilterPresets_%1").arg(mode);
     QString saved = AppSettings::instance().value(key, "").toString();
     m_filterWidths.clear();
@@ -3602,7 +3610,7 @@ void RxApplet::rebuildFilterButtons()
 
         // Customise menu only for the operator's presets: with a
         // radio-declared set, `i` indexes the radio list while
-        // m_filterCustomLo/Hi and m_filterWidths (1-6 saved entries) are
+        // m_filterCustomLo/Hi and m_filterWidths (1-8 saved entries) are
         // operator arrays, so it would read/write out of range.
         if (customisable) {
             btn->setContextMenuPolicy(Qt::CustomContextMenu);
