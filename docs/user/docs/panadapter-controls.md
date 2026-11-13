@@ -273,6 +273,8 @@ On an ANAN the **FFT AVG** readout is a time in milliseconds (one step is 10 ms)
 | **NB Blank** + **Off/On** | 5–95, default 15 | Suppresses impulse-noise stripes in the waterfall. Higher values blank less. |
 | **Black Level** + **Off / SW / HW** | 0–100, default 50 | Waterfall black point. The button cycles automatic black level: **SW** estimates the noise floor in AetherSDR and the slider sets the offset from it; **HW** uses the radio's own level (FlexRadio only; other radios cycle Off ↔ SW); **Off** is manual. |
 | **WtrFall Gain** | 0–100, default 50 | Waterfall color gain. |
+| **Contrast** | 0–100, default 50 | Waterfall contrast, applied to the palette itself: higher darkens the noise floor and brightens signals, lower flattens them. 50 leaves the palette as it is. Recolors the waterfall already on screen. |
+| **Palette Shift** | 0–100, default 50 | Slides the whole palette: below 50 towards its bottom colour (usually black), above 50 towards its top colour. 50 leaves the palette as it is. Recolors the waterfall already on screen. |
 | **WtrFall Rate** | 1–100, default 100 | Scroll speed: 1 is slowest, 100 fastest. |
 
 #### BACKGROUND

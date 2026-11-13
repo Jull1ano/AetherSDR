@@ -3627,6 +3627,8 @@ int MainWindow::cloneDisplaySettingsToAllPans(PanadapterApplet* source)
         dst->setFreqGridSpacing(src->freqGridSpacing());
         dst->setFreqScaleFontPt(src->freqScaleFontPt());
         dst->setWfColorScheme(src->wfColorScheme());
+        dst->setWfContrast(src->wfContrast());
+        dst->setWfPaletteShift(src->wfPaletteShift());
 
         // ── 3D VIEW ───────────────────────────────────────────────────────
         dst->setSpectrumRenderMode(src->spectrumRenderMode());
@@ -3733,6 +3735,7 @@ int MainWindow::cloneDisplaySettingsToAllPans(PanadapterApplet* source)
                 dst->backgroundOpacity(), dst->freqGridSpacing(),
                 dst->backgroundFillColor(), dst->freqScaleFontPt(),
                 dst->fftSmoothing(), dst->fftDecombHz());
+            dstMenu->syncWfColorShape(dst->wfContrast(), dst->wfPaletteShift());
         }
         ++cloned;
     }
@@ -5096,6 +5099,12 @@ void MainWindow::wirePanadapter(PanadapterApplet* applet)
     connect(menu, &SpectrumOverlayMenu::wfColorSchemeChanged,
             sw, &SpectrumWidget::setWfColorScheme,
             Qt::UniqueConnection);
+    connect(menu, &SpectrumOverlayMenu::wfContrastChanged,
+            sw, &SpectrumWidget::setWfContrast,
+            Qt::UniqueConnection);
+    connect(menu, &SpectrumOverlayMenu::wfPaletteShiftChanged,
+            sw, &SpectrumWidget::setWfPaletteShift,
+            Qt::UniqueConnection);
     connect(menu, &SpectrumOverlayMenu::spectrumRenderModeChanged,
             sw, &SpectrumWidget::setSpectrumRenderMode,
             Qt::UniqueConnection);
@@ -5342,6 +5351,8 @@ void MainWindow::wirePanadapter(PanadapterApplet* applet)
         sw->setFftWeightedAvg(false);
         sw->setFftHeatMap(true);
         sw->setWfColorScheme(0);
+        sw->setWfContrast(50);
+        sw->setWfPaletteShift(50);
         sw->setWfColorGain(50);
         sw->setWfBlackLevel(15);
         sw->setWfAutoBlack(true);
@@ -5395,6 +5406,8 @@ void MainWindow::wirePanadapter(PanadapterApplet* applet)
         s.setValue(sw->settingsKey("DisplayFftLineWidth"),        "1.0");
         s.setValue(sw->settingsKey("DisplayFftHeatMap"),          "True");
         s.setValue(sw->settingsKey("DisplayWfColorScheme"),       "0");
+        s.setValue(sw->settingsKey("DisplayWfContrast"),          "50");
+        s.setValue(sw->settingsKey("DisplayWfPaletteShift"),      "50");
         s.setValue(sw->settingsKey("DisplayWfColorGain"),         "50");
         s.setValue(sw->settingsKey("DisplayWfBlackLevel"),        "15");
         s.setValue(sw->settingsKey("DisplayWfAutoBlack"),         "True");
@@ -5437,6 +5450,7 @@ void MainWindow::wirePanadapter(PanadapterApplet* applet)
                                   QColor(0x00, 0xe5, 0xff), 100);
         menu->syncExtraDisplaySettings(false, 1.15f, 80, 0,
                                        QColor(0x0a, 0x0a, 0x14), 8, 0, 0);
+        menu->syncWfColorShape(50, 50);
     });
     connect(menu, &SpectrumOverlayMenu::displaySettingsCloneRequested,
             this, [this, applet, sw] {

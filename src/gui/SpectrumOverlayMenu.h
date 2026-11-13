@@ -81,6 +81,8 @@ public:
     void syncWfLineDuration(int rate);
     void syncKiwiWaterfallSettings(int minDbm, int maxDbm, bool autoScale,
                                    int rate);
+    // Waterfall Contrast / Palette shift sliders (0..100, 50 = palette as is).
+    void syncWfColorShape(int contrast, int shift);
     // Sync blanker/cursor/opacity controls not covered by syncDisplaySettings.
     void syncExtraDisplaySettings(bool blankerOn, float blankerThresh,
                                   int bgOpacity,
@@ -304,6 +306,8 @@ signals:
     void kiwiWaterfallAutoRequested();
     void kiwiWaterfallRateChanged(int rate);
     void wfColorSchemeChanged(int scheme);
+    void wfContrastChanged(int contrast);
+    void wfPaletteShiftChanged(int shift);
     void spectrumRenderModeChanged(int mode);
     void dssFloorDepthChanged(int dB);
     void dssGainChanged(int pct);
@@ -571,6 +575,10 @@ private:
     QSlider*     m_gainSlider{nullptr};
     QLabel*      m_gainTitleLabel{nullptr};
     QLabel*      m_gainLabel{nullptr};
+    QSlider*     m_wfContrastSlider{nullptr};
+    QLabel*      m_wfContrastLabel{nullptr};
+    QSlider*     m_wfShiftSlider{nullptr};
+    QLabel*      m_wfShiftLabel{nullptr};
     QSlider*     m_blackSlider{nullptr};
     QLabel*      m_blackTitleLabel{nullptr};
     QLabel*      m_blackLabel{nullptr};

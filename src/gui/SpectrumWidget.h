@@ -7,6 +7,7 @@
 
 #include <limits>
 #include <algorithm>
+#include <cmath>
 #include <array>
 #include <functional>
 #include <memory>
@@ -101,6 +102,23 @@ inline const char* wfSchemeName(WfColorScheme scheme)
     case WfColorScheme::Volcano:   return "Volcano";
     default:                       return "Default";
     }
+}
+
+// Waterfall Contrast and Palette shift (brick3-angelia), applied between the
+// waterfall level and the palette. Both run 0..100 with 50 leaving the level
+// untouched. Contrast scales the level about the middle of the palette (x1/3
+// at 0, x3 at 100): more contrast darkens the floor and brightens signals.
+// Shift then slides it along the palette by up to half its length: down
+// (towards black) below 50, up above. Inline so a test reaches it without
+// the SpectrumWidget TU.
+inline float wfShapeLevel(float level, int contrast, int shift)
+{
+    if (contrast == 50 && shift == 50)
+        return level;
+    const float k = std::pow(3.0f, (std::clamp(contrast, 0, 100) - 50) / 50.0f);
+    const float out = 0.5f + (level - 0.5f) * k
+                    + static_cast<float>(std::clamp(shift, 0, 100) - 50) / 100.0f;
+    return std::clamp(out, 0.0f, 1.0f);
 }
 
 // Spectrum render mode for the panadapter surface.
@@ -771,6 +789,10 @@ public:
     // assume.
     void setWfRateShapedLocally(bool shapedLocally);
     void setWfColorScheme(int scheme);
+    // Waterfall Contrast / Palette shift, 0..100, 50 = as the palette is
+    // (wfShapeLevel). Client side and per pan, like the scheme.
+    void setWfContrast(int contrast);
+    void setWfPaletteShift(int shift);
     // Spectrum render mode: 2D (FFT trace + waterfall) or 3D (3DSS stacked
     // perspective trace surface). Persisted per-panadapter.
     void setSpectrumRenderMode(int mode);
@@ -817,6 +839,8 @@ public:
     void  setRadioSideAutoBlackAvailable(bool available);
     int   wfLineDuration() const       { return m_wfLineDuration; }
     int   wfColorScheme() const        { return static_cast<int>(m_wfColorScheme); }
+    int   wfContrast() const           { return m_wfContrast; }
+    int   wfPaletteShift() const       { return m_wfPaletteShift; }
     int   noiseFloorPosition() const   { return m_noiseFloorPosition; }
     bool  noiseFloorEnabled() const    { return m_noiseFloorEnable; }
 
@@ -1822,6 +1846,8 @@ private:
     // effectiveWfAutoBlackRadioSide(). (#4606)
     bool  m_radioSideAutoBlackAvailable{true};
     WfColorScheme m_wfColorScheme{WfColorScheme::Default};
+    int   m_wfContrast{50};          // 0-100, 50 = palette as is
+    int   m_wfPaletteShift{50};      // 0-100, 50 = palette as is
     // Palette the visible RGB rows currently hold. Diverges from the live
     // token only while a stream is parked (see WaterfallStreamState) or a
     // palette refresh is deferred behind a frequency preview.

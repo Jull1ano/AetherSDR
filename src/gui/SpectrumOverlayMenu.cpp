@@ -2396,6 +2396,24 @@ void SpectrumOverlayMenu::buildDisplayPanel()
         emit wfColorGainChanged(v);
     });
 
+    // brick3-angelia: Contrast and Palette shift reshape the palette itself,
+    // here on the PC, so they also recolour what is already on screen. 50 is
+    // the palette as it is.
+    makeRow("Contrast:", 0, 100, 50, m_wfContrastSlider, m_wfContrastLabel);
+    m_wfContrastSlider->setObjectName("displayWfContrastSlider");
+    m_wfContrastSlider->setAccessibleName(tr("Waterfall contrast"));
+    connect(m_wfContrastSlider, &QSlider::valueChanged, this, [this](int v) {
+        m_wfContrastLabel->setText(QString::number(v));
+        emit wfContrastChanged(v);
+    });
+    makeRow("Palette Shift:", 0, 100, 50, m_wfShiftSlider, m_wfShiftLabel);
+    m_wfShiftSlider->setObjectName("displayWfPaletteShiftSlider");
+    m_wfShiftSlider->setAccessibleName(tr("Waterfall palette shift"));
+    connect(m_wfShiftSlider, &QSlider::valueChanged, this, [this](int v) {
+        m_wfShiftLabel->setText(QString::number(v));
+        emit wfPaletteShiftChanged(v);
+    });
+
     // Rate
     {
         auto* lbl = new QLabel("WtrFall Rate:");
@@ -2771,6 +2789,11 @@ void SpectrumOverlayMenu::buildDisplayPanel()
     m_blackSlider->setToolTip("Waterfall black level. Decrease to darken the noise floor.");
     if (m_autoBlackBtn) m_autoBlackBtn->setToolTip("Automatically adjusts the waterfall black level to match the current noise floor.");
     m_rateSlider->setToolTip("Waterfall rate. 1% = slowest; 100% = fastest.");
+    m_wfContrastSlider->setToolTip("Waterfall contrast. Higher values darken the floor and "
+                                   "brighten signals; 50 = the palette as it is.");
+    m_wfShiftSlider->setToolTip("Slides the whole waterfall palette: lower values move "
+                                "towards black, higher towards the top colour; "
+                                "50 = the palette as it is.");
     if (m_wfBlankerThreshSlider) m_wfBlankerThreshSlider->setToolTip("Waterfall noise blanking threshold. Higher values blank less.");
     if (m_freqGridSpacingCmb) m_freqGridSpacingCmb->setToolTip("Frequency grid line spacing. Auto adapts to the current span.");
     if (m_freqScaleFontCmb) m_freqScaleFontCmb->setToolTip("Text size of the frequency scale labels. The scale strip grows to fit larger sizes.");
@@ -3368,6 +3391,20 @@ void SpectrumOverlayMenu::syncWfLineDuration(int rate)
     const int sliderValue = lineDurationToRateSliderValue(rate);
     m_rateSlider->setValue(sliderValue);
     m_rateLabel->setText(rateSliderLabelText(sliderValue));
+}
+
+void SpectrumOverlayMenu::syncWfColorShape(int contrast, int shift)
+{
+    if (m_wfContrastSlider) {
+        QSignalBlocker b(m_wfContrastSlider);
+        m_wfContrastSlider->setValue(contrast);
+        m_wfContrastLabel->setText(QString::number(m_wfContrastSlider->value()));
+    }
+    if (m_wfShiftSlider) {
+        QSignalBlocker b(m_wfShiftSlider);
+        m_wfShiftSlider->setValue(shift);
+        m_wfShiftLabel->setText(QString::number(m_wfShiftSlider->value()));
+    }
 }
 
 void SpectrumOverlayMenu::syncExtraDisplaySettings(bool blankerOn, float blankerThresh,

@@ -1803,6 +1803,8 @@ QVariantMap SpectrumWidget::automationDisplaySettingsSnapshot() const
     snap[QStringLiteral("freqGridSpacing")] = m_freqGridSpacingKhz;
     snap[QStringLiteral("freqScaleFontPt")] = m_freqScaleFontPt;
     snap[QStringLiteral("wfColorScheme")] = static_cast<int>(m_wfColorScheme);
+    snap[QStringLiteral("wfContrast")] = m_wfContrast;
+    snap[QStringLiteral("wfPaletteShift")] = m_wfPaletteShift;
 
     // 3D VIEW
     snap[QStringLiteral("spectrumRenderMode")] =
@@ -2654,6 +2656,10 @@ void SpectrumWidget::loadSettings()
     m_wfColorScheme  = static_cast<WfColorScheme>(
         std::clamp(s.value(settingsKey("DisplayWfColorScheme"), "0").toInt(),
                    0, static_cast<int>(WfColorScheme::Count) - 1));
+    m_wfContrast = std::clamp(
+        s.value(settingsKey("DisplayWfContrast"), "50").toInt(), 0, 100);
+    m_wfPaletteShift = std::clamp(
+        s.value(settingsKey("DisplayWfPaletteShift"), "50").toInt(), 0, 100);
     // Principle V: the 3D view's controls live in one owned object. The legacy
     // flat Display3DGain key is grandfathered and only seeds the first load.
     loadDisplay3DSettings(s.value(settingsKey("Display3DGain"), "70").toInt());
@@ -2694,6 +2700,7 @@ void SpectrumWidget::loadSettings()
         m_overlayMenu->syncExtraDisplaySettings(m_wfBlankerEnabled,
             m_wfBlankerThreshold, m_bgOpacity, m_freqGridSpacingKhz, m_bgFillColor,
             m_freqScaleFontPt, m_fftSmoothing, m_fftDecombHz);
+        m_overlayMenu->syncWfColorShape(m_wfContrast, m_wfPaletteShift);
     }
     // Refresh the noise-floor target so the slider position takes effect
     // even when the overlay menu is built but not yet shown.
@@ -4966,6 +4973,34 @@ void SpectrumWidget::setWfColorScheme(int scheme) {
     update();
 }
 
+void SpectrumWidget::setWfContrast(int contrast)
+{
+    const int clamped = std::clamp(contrast, 0, 100);
+    if (clamped != m_wfContrast) {
+        m_wfContrast = clamped;
+        auto& s = AppSettings::instance();
+        s.setValue(settingsKey("DisplayWfContrast"), QString::number(m_wfContrast));
+        s.save();
+        // The shape is part of the level -> colour LUT, so the rows already on
+        // screen recolour at once, as on a Scheme change.
+        recolorWaterfallViewport();
+    }
+    update();
+}
+
+void SpectrumWidget::setWfPaletteShift(int shift)
+{
+    const int clamped = std::clamp(shift, 0, 100);
+    if (clamped != m_wfPaletteShift) {
+        m_wfPaletteShift = clamped;
+        auto& s = AppSettings::instance();
+        s.setValue(settingsKey("DisplayWfPaletteShift"), QString::number(m_wfPaletteShift));
+        s.save();
+        recolorWaterfallViewport();
+    }
+    update();
+}
+
 void SpectrumWidget::setDssFloorDepthForSource(bool kiwiSource,
                                                float dB,
                                                bool persist)
@@ -6196,10 +6231,15 @@ quint64 SpectrumWidget::waterfallPaletteToken() const
     // theme reload rewrites the gradient stops of every preset (#3122).
     // Asking through wfSchemeStops() forces the lazy first fill, so a token
     // taken before the first paint is not the pre-init generation.
+    // Contrast and Palette shift (0..100 each) shape the same LUT, so they
+    // are folded in too.
     int stopCount = 0;
     (void)wfSchemeStops(m_wfColorScheme, stopCount);
-    return (wfStopsCacheGeneration() << 8)
+    quint64 token = (wfStopsCacheGeneration() << 8)
         | static_cast<quint64>(static_cast<int>(m_wfColorScheme));
+    token = (token << 7) | static_cast<quint64>(m_wfContrast);
+    token = (token << 7) | static_cast<quint64>(m_wfPaletteShift);
+    return token;
 }
 
 void SpectrumWidget::paintWaterfallRowsFromHistory(
@@ -12947,7 +12987,9 @@ QRgb SpectrumWidget::waterfallLevelToRgb(float level) const
 {
     int n = 0;
     const auto* stops = wfSchemeStops(m_wfColorScheme, n);
-    return interpolateGradient(std::clamp(level, 0.0f, 1.0f), stops, n);
+    return interpolateGradient(
+        wfShapeLevel(std::clamp(level, 0.0f, 1.0f), m_wfContrast, m_wfPaletteShift),
+        stops, n);
 }
 
 // The colour a cleared / not-yet-painted waterfall pixel takes.  Every preset
