@@ -268,6 +268,8 @@ On an ANAN the **FFT AVG** readout is a time in milliseconds (one step is 10 ms)
 
 #### WATERFALL
 
+The palette picker sits at the right end of the **WATERFALL** heading: a small drop-down showing the current scheme (Default, Grayscale, Blue-Green, Fire, Plasma, Purple, Glacier, Volcano). Changing it recolors the waterfall already on screen, including scrollback.
+
 | Control | Range / default | What it does |
 |---------|-----------------|-------------|
 | **NB Blank** + **Off/On** | 5–95, default 15 | Suppresses impulse-noise stripes in the waterfall. Higher values blank less. |
@@ -293,7 +295,6 @@ On an ANAN the **FFT AVG** readout is a time in milliseconds (one step is 10 ms)
 |---------|-------------|
 | **Grid** | Frequency grid spacing (Auto adapts to the span). |
 | **Scale text** | Size of the frequency-scale labels. |
-| **Scheme** | Waterfall palette: Default, Grayscale, Blue-Green, Fire, Plasma, Purple, Glacier, Volcano. Changing it recolors the waterfall already on screen, including scrollback. |
 
 #### 3D VIEW
 

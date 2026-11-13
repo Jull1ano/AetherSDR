@@ -1883,7 +1883,9 @@ void SpectrumOverlayMenu::buildDisplayPanel()
     // Appearance / 3D View / System groups so users can scan for the control
     // they want instead of reading a flat 24-row list top to bottom.
     bool firstHeader = true;
-    auto makeHeader = [&](const QString& text) {
+    // `trailing`, if given, sits at the right end of the header's own line
+    // (the waterfall's scheme picker).
+    auto makeHeader = [&](const QString& text, QWidget* trailing = nullptr) {
         if (!firstHeader) {
             grid->setRowMinimumHeight(row, 8);  // breathing room above each new group
             ++row;
@@ -1893,7 +1895,12 @@ void SpectrumOverlayMenu::buildDisplayPanel()
         auto* hdr = new QLabel(text);
         AetherSDR::ThemeManager::instance().applyStyleSheet(hdr,
             "QLabel { color: {{color.accent}}; font-size: 9px; font-weight: bold; border: none; }");
-        grid->addWidget(hdr, row, 0, 1, 4);
+        if (trailing) {
+            grid->addWidget(hdr, row, 0, 1, 2);
+            grid->addWidget(trailing, row, 2, 1, 2, Qt::AlignRight | Qt::AlignVCenter);
+        } else {
+            grid->addWidget(hdr, row, 0, 1, 4);
+        }
         ++row;
 
         auto* line = new QFrame;
@@ -2311,7 +2318,25 @@ void SpectrumOverlayMenu::buildDisplayPanel()
             this, &SpectrumOverlayMenu::requestNoiseFloorRange);
     syncNoiseFloorRange();
 
-    makeHeader("WATERFALL");
+    // brick3-angelia: the scheme (palette) picker rides on the WATERFALL
+    // header, small and quiet until hovered, instead of a row under
+    // APPEARANCE.
+    m_colorSchemeCmb = new QComboBox;
+    m_colorSchemeCmb->setObjectName("displayColorSchemeCombo");
+    m_colorSchemeCmb->setAccessibleName(tr("Waterfall palette"));
+    m_colorSchemeCmb->setFixedHeight(16);
+    m_colorSchemeCmb->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+    applyComboStyle(m_colorSchemeCmb, QStringLiteral(
+        "QComboBox { background: transparent; border: 1px solid transparent;"
+        " color: {{color.text.secondary}}; font-size: 10px; padding: 0px 2px 0px 4px; }"
+        "QComboBox:hover { border: 1px solid {{color.border.strong}};"
+        " color: {{color.text.primary}}; }"
+        "QComboBox::drop-down { width: 11px; }"));
+    for (int i = 0; i < static_cast<int>(WfColorScheme::Count); ++i)
+        m_colorSchemeCmb->addItem(wfSchemeName(static_cast<WfColorScheme>(i)));
+    connect(m_colorSchemeCmb, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int idx) { emit wfColorSchemeChanged(idx); });
+    makeHeader("WATERFALL", m_colorSchemeCmb);
 
     // NB Blank + Off/On
     makeRowWithBtn("NB Blank:", 5, 95, 15, m_wfBlankerThreshSlider, m_wfBlankerThreshLabel,
@@ -2590,21 +2615,6 @@ void SpectrumOverlayMenu::buildDisplayPanel()
     }
 
     // ── Scheme dropdown ───────────────────────────────────────────────────
-    {
-        auto* lbl = new QLabel("Scheme:");
-        lbl->setStyleSheet(labelStyle);
-        grid->addWidget(lbl, row, 0);
-        m_colorSchemeCmb = new QComboBox;
-        m_colorSchemeCmb->setObjectName("displayColorSchemeCombo");
-        m_colorSchemeCmb->setFixedHeight(18);
-        applyComboStyle(m_colorSchemeCmb);
-        for (int i = 0; i < static_cast<int>(WfColorScheme::Count); ++i)
-            m_colorSchemeCmb->addItem(wfSchemeName(static_cast<WfColorScheme>(i)));
-        grid->addWidget(m_colorSchemeCmb, row, 1, 1, 3);
-        connect(m_colorSchemeCmb, QOverload<int>::of(&QComboBox::currentIndexChanged),
-                this, [this](int idx) { emit wfColorSchemeChanged(idx); });
-        ++row;
-    }
 
     makeHeader("3D VIEW");
 
