@@ -102,13 +102,28 @@ constexpr int kGripGap = 4;           // between a grip and the blocks
 // AGC / squelch.
 constexpr int kQuickRowY1 = kButtonHeight + kRowSpacing;
 constexpr int kQuickRxHeight = 2 * kButtonHeight + kRowSpacing;
-constexpr int kFilterButtonWidth = 40;
-constexpr int kFilterSlots = 8;       // SSB has eight presets (brick3-angelia)
+// brick3-angelia: eight filter presets (two rows of four) with the step,
+// volume, AGC and squelch controls trimmed so the block is no wider than
+// the six-preset one was (438 px) and stays on the bands' line.
+constexpr int kFilterButtonWidth = 38;
+constexpr int kFilterSlots = 8;       // SSB has eight presets
 constexpr int kFilterCols = 4;        // two rows of four
+constexpr int kStepLabelWidth = 52;   // between the two step arrows
+constexpr int kAfSliderWidth = 66;
+constexpr int kAgcComboWidth = 62;
+constexpr int kAgcSliderWidth = 72;
+constexpr int kAgcAutoWidth = 26;
+constexpr int kSquelchButtonWidth = 40;
+constexpr int kQuickColAWidth = 18 + 2 + kStepLabelWidth + 2 + 18;      // 92
+constexpr int kQuickColBWidth =
+    kAgcComboWidth + 2 + kAgcSliderWidth + 2 + kAgcAutoWidth;           // 164
+constexpr int kSquelchSliderWidth = kQuickColBWidth - kSquelchButtonWidth - 2;
 constexpr int kQuickColA = kFilterCols * kFilterButtonWidth
-                           + (kFilterCols - 1) * kSpacing + 8;          // 174
-constexpr int kQuickColB = kQuickColA + 102 + 8;                        // 284
-constexpr int kQuickRxWidth = kQuickColB + 196;                         // 480
+                           + (kFilterCols - 1) * kSpacing + 8;          // 166
+constexpr int kQuickColB = kQuickColA + kQuickColAWidth + 8;            // 266
+constexpr int kQuickRxWidth = kQuickColB + kQuickColBWidth;             // 430
+static_assert(kQuickRxWidth <= 438, "the quick RX block must fit where the old one did");
+static_assert(24 + 2 + kAfSliderWidth == kQuickColAWidth, "volume row fills column A");
 
 // Not "BandBarWidth", the key of the earlier bar of bands alone: a width
 // dragged there would fold this wider bar onto three lines.
@@ -356,12 +371,13 @@ QuickRxStrip::QuickRxStrip(QWidget* parent) : QWidget(parent)
     m_stepDown = makeButton(QRect(kQuickColA, 0, 18, kButtonHeight), QString(QChar(0x25C0)),
                             barText("Smaller tuning step"));
     m_step = new QLabel(this);
-    m_step->setGeometry(kQuickColA + 20, 0, 62, kButtonHeight);
+    m_step->setGeometry(kQuickColA + 20, 0, kStepLabelWidth, kButtonHeight);
     m_step->setAlignment(Qt::AlignCenter);
     m_step->setStyleSheet(kValueStyle);
     m_step->setToolTip(barText("Tuning step"));
     m_step->setAccessibleName(barText("Tuning step"));
-    m_stepUp = makeButton(QRect(kQuickColA + 84, 0, 18, kButtonHeight), QString(QChar(0x25B6)),
+    m_stepUp = makeButton(QRect(kQuickColA + 22 + kStepLabelWidth, 0, 18, kButtonHeight),
+                          QString(QChar(0x25B6)),
                           barText("Larger tuning step"));
     connect(m_stepDown, &QPushButton::clicked, this, [this] {
         if (QPushButton* source = controls().stepDown)
@@ -381,7 +397,7 @@ QuickRxStrip::QuickRxStrip(QWidget* parent) : QWidget(parent)
             source->click();
         syncSoon();
     });
-    m_af = makeSlider(QRect(kQuickColA + 26, kQuickRowY1, 76, kButtonHeight),
+    m_af = makeSlider(QRect(kQuickColA + 26, kQuickRowY1, kAfSliderWidth, kButtonHeight),
                       barText("Volume (AF gain)"));
     connect(m_af, &QSlider::valueChanged, this, [this](int v) {
         if (QSlider* source = controls().afGain)
@@ -390,7 +406,7 @@ QuickRxStrip::QuickRxStrip(QWidget* parent) : QWidget(parent)
 
     // Column B: AGC over squelch.
     m_agc = new QComboBox(this);
-    m_agc->setGeometry(kQuickColB, 0, 62, kButtonHeight);
+    m_agc->setGeometry(kQuickColB, 0, kAgcComboWidth, kButtonHeight);
     m_agc->setFocusPolicy(Qt::NoFocus);
     m_agc->setStyleSheet(kComboStyle);
     m_agc->setToolTip(barText("AGC mode"));
@@ -405,27 +421,31 @@ QuickRxStrip::QuickRxStrip(QWidget* parent) : QWidget(parent)
         }
         syncSoon();
     });
-    m_agcThreshold = makeSlider(QRect(kQuickColB + 64, 0, 104, kButtonHeight),
+    m_agcThreshold = makeSlider(QRect(kQuickColB + kAgcComboWidth + 2, 0, kAgcSliderWidth,
+                                      kButtonHeight),
                                 barText("AGC threshold"));
     connect(m_agcThreshold, &QSlider::valueChanged, this, [this](int v) {
         if (QSlider* source = controls().agcThreshold)
             source->setValue(v);
     });
-    m_agcAuto = makeButton(QRect(kQuickColB + 170, 0, 26, kButtonHeight), QStringLiteral("A"),
+    m_agcAuto = makeButton(QRect(kQuickColB + kAgcComboWidth + 2 + kAgcSliderWidth + 2, 0,
+                                 kAgcAutoWidth, kButtonHeight),
+                           QStringLiteral("A"),
                            barText("Automatic AGC threshold"));
     connect(m_agcAuto, &QPushButton::clicked, this, [this] {
         if (QPushButton* source = controls().autoAgcThreshold)
             source->click();
         syncSoon();
     });
-    m_squelch = makeButton(QRect(kQuickColB, kQuickRowY1, 40, kButtonHeight),
+    m_squelch = makeButton(QRect(kQuickColB, kQuickRowY1, kSquelchButtonWidth, kButtonHeight),
                            QStringLiteral("SQL"), barText("Squelch on or off"));
     connect(m_squelch, &QPushButton::clicked, this, [this] {
         if (QPushButton* source = controls().squelch)
             source->click();
         syncSoon();
     });
-    m_squelchLevel = makeSlider(QRect(kQuickColB + 42, kQuickRowY1, 154, kButtonHeight),
+    m_squelchLevel = makeSlider(QRect(kQuickColB + kSquelchButtonWidth + 2, kQuickRowY1,
+                                      kSquelchSliderWidth, kButtonHeight),
                                 barText("Squelch level"));
     connect(m_squelchLevel, &QSlider::valueChanged, this, [this](int v) {
         if (QSlider* source = controls().squelchLevel)
@@ -464,13 +484,19 @@ void QuickRxStrip::sync()
     const RxApplet::QuickControls c = controls();
     const QWidget* panel = m_source.data();
 
-    // The presets the panel shows, at most eight.
-    int shown = 0;
+    // The presets the panel shows, at most eight, widest first (asked for
+    // on brick3-angelia: 4K 3.6K 3.3K 2.9K over 2.7K 2.4K 2.1K 1.8K). The
+    // panel itself keeps its narrow-to-wide order.
+    QVector<QPushButton*> visible;
     for (QPushButton* source : c.filterButtons) {
-        if (shown >= static_cast<int>(m_filter.size()))
-            break;
-        if (!source || !source->isVisibleTo(panel))
-            continue;
+        if (source && source->isVisibleTo(panel))
+            visible.append(source);
+    }
+    if (visible.size() > static_cast<int>(m_filter.size()))
+        visible.resize(static_cast<int>(m_filter.size()));
+    std::reverse(visible.begin(), visible.end());
+    int shown = 0;
+    for (QPushButton* source : visible) {
         m_filterSource[shown] = source;
         mirrorButton(m_filter[shown], source, panel, true);
         if (m_filter[shown]->isHidden())
