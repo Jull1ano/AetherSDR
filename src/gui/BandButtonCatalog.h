@@ -41,22 +41,25 @@ inline constexpr std::array<Entry, 14> kBroadcast{{
     {"11m", "BC11", 25.800, "AM"},
 }};
 
-// The one-line bar: amateur bands low to high (CB beside 10 m), then the
-// broadcast bands (kBroadcast), then the utility targets.
+// The one-line bar: the amateur bands, then the broadcast bands
+// (kBroadcast), then the utility targets. The bar fills two rows of eight
+// row by row, so the first eight make the top row: the LF/MF bands, then
+// 160 and the classic 80 / 40 / 20 / 10 side by side (asked for on
+// brick3-angelia); 60, 30, 17, 15, 12, CB and 6 make the second row.
 inline constexpr std::array<Entry, 15> kBarAmateur{{
     {"2200", "2200m", 0.1375, "CW"},
     {"630", "630m", 0.475, "CW"},
     {"MW", "LMW", 0.999, "AM"},
     {"160", "160m", 1.900, "LSB"},
     {"80", "80m", 3.800, "LSB"},
-    {"60", "60m", 5.357, "USB"},
     {"40", "40m", 7.150, "LSB"},
-    {"30", "30m", 10.125, "DIGU"},
     {"20", "20m", 14.225, "USB"},
+    {"10", "10m", 28.400, "USB"},
+    {"60", "60m", 5.357, "USB"},
+    {"30", "30m", 10.125, "DIGU"},
     {"17", "17m", 18.130, "USB"},
     {"15", "15m", 21.300, "USB"},
     {"12", "12m", 24.950, "USB"},
-    {"10", "10m", 28.400, "USB"},
     {"CB", "CB", 27.185, "AM"},
     {"6", "6m", 50.150, "USB"},
 }};
