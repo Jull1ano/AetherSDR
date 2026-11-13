@@ -1,6 +1,5 @@
 #include "TitleDspStrip.h"
 
-#include <QGridLayout>
 #include <QPushButton>
 #include <QSizePolicy>
 #include <QStringList>
@@ -20,6 +19,12 @@ const QString kButtonStyle = QStringLiteral(
 constexpr int kButtonWidth = 40;
 constexpr int kButtonHeight = 20;
 constexpr int kColumns = 5;
+constexpr int kSpacing = 2;
+// MNR, DFNR, ANF and MNF stand a little apart from the blanker and the
+// other noise reductions (brick3-angelia): a few pixels more before the
+// fourth column.
+constexpr int kGroupColumn = 3;
+constexpr int kGroupGap = 4;
 
 struct SlotDef {
     const char* id;
@@ -67,11 +72,6 @@ TitleDspStrip::TitleDspStrip(QWidget* parent) : QWidget(parent)
     setObjectName(QStringLiteral("titleDspStrip"));
     setAccessibleName(tr("Receive DSP switches"));
 
-    auto* grid = new QGridLayout(this);
-    grid->setContentsMargins(0, 0, 0, 0);
-    grid->setHorizontalSpacing(2);
-    grid->setVerticalSpacing(2);
-
     int index = 0;
     for (const SlotDef& def : kSlots) {
         const QString id = QString::fromLatin1(def.id);
@@ -94,11 +94,15 @@ TitleDspStrip::TitleDspStrip(QWidget* parent) : QWidget(parent)
         connect(b, &QWidget::customContextMenuRequested, this, [this, id](const QPoint&) {
             emit settingsRequested(id);
         });
-        grid->addWidget(b, index / kColumns, index % kColumns);
+        const int col = index % kColumns;
+        const int row = index / kColumns;
+        b->move(col * (kButtonWidth + kSpacing) + (col >= kGroupColumn ? kGroupGap : 0),
+                row * (kButtonHeight + kSpacing));
         m_slots.append({id, b, tip});
         ++index;
     }
-    setFixedSize(kColumns * kButtonWidth + (kColumns - 1) * 2, 2 * kButtonHeight + 2);
+    setFixedSize(kColumns * kButtonWidth + (kColumns - 1) * kSpacing + kGroupGap,
+                 2 * kButtonHeight + kSpacing);
 }
 
 QPushButton* TitleDspStrip::button(const QString& id) const
