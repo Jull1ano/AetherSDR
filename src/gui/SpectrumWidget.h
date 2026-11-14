@@ -280,6 +280,13 @@ public:
                         const QString& id,
                         int durationMs = 5000);
 
+    // brick3-angelia: the title bar's pause. While frozen every incoming FFT
+    // frame and waterfall row is dropped, so the spectrum and the waterfall
+    // hold what they show (to swap antennas, say); on resume the waterfall
+    // carries on directly under the frozen rows, so the change is one line.
+    void setDisplayFrozen(bool frozen);
+    bool displayFrozen() const { return m_displayFrozen; }
+
     // Feed a new FFT frame. bins are scaled dBm values. heldForPresentation:
     // Receive Sync queued it; `get tracedebug <pan> bins` refuses it.
     void updateSpectrum(const QVector<float>& binsDbm, const SpectrumDecodeScale& decodeScale = {},
@@ -1847,6 +1854,7 @@ private:
     bool  m_radioSideAutoBlackAvailable{true};
     WfColorScheme m_wfColorScheme{WfColorScheme::Default};
     int   m_wfContrast{50};          // 0-100, 50 = palette as is
+    bool  m_displayFrozen{false};    // setDisplayFrozen(): frames dropped
     int   m_wfPaletteShift{50};      // 0-100, 50 = palette as is
     // Palette the visible RGB rows currently hold. Diverges from the live
     // token only while a stream is parked (see WaterfallStreamState) or a

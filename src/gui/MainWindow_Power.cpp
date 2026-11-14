@@ -10,8 +10,12 @@
 #include "MainWindow.h"
 
 #include "ConnectionPanel.h"
+#include "PanadapterApplet.h"
+#include "PanadapterStack.h"
+#include "SpectrumWidget.h"
 #include "TitleBar.h"
 #include "core/AppSettings.h"
+#include "core/AudioEngine.h"
 #include "models/RadioModel.h"
 
 #include <QTimer>
@@ -47,6 +51,50 @@ void MainWindow::refreshPowerButton()
         m_titleBar->setPowerState(TitleBar::PowerState::Off,
             tr("Power is off. Click to connect to %1.").arg(radio));
     }
+}
+
+void MainWindow::refreshPauseButton()
+{
+    if (!m_titleBar)
+        return;
+    const bool available = m_radioModel.isConnected();
+    m_titleBar->setPauseState(m_displayPaused, available,
+        !available ? tr("Pause: freezes the spectrum and waterfall. Connect to a radio first.")
+        : m_displayPaused
+            ? tr("Paused: the spectrum and waterfall are frozen and this computer's "
+                 "audio is muted; the radio keeps running. Click to resume: the "
+                 "waterfall carries on right under the frozen rows.")
+            : tr("Pause: freeze the spectrum and waterfall and mute this computer's "
+                 "audio, e.g. while you change antennas. Resume carries on right "
+                 "under the frozen rows, so the two can be compared at a glance."));
+}
+
+void MainWindow::setDisplayPaused(bool paused)
+{
+    if (paused && !m_radioModel.isConnected())
+        paused = false;
+    if (paused != m_displayPaused) {
+        m_displayPaused = paused;
+        if (m_panStack) {
+            for (auto* applet : m_panStack->allApplets()) {
+                if (SpectrumWidget* sw = applet ? applet->spectrumWidget() : nullptr)
+                    sw->setDisplayFrozen(paused);
+            }
+        }
+        if (m_audio) {
+            if (paused) {
+                // Only a mute the pause made is undone on resume.
+                m_pauseMutedAudio = !m_audio->isMuted();
+                if (m_pauseMutedAudio)
+                    m_audio->setMuted(true);
+            } else if (m_pauseMutedAudio) {
+                m_pauseMutedAudio = false;
+                if (m_audio->isMuted())
+                    m_audio->setMuted(false);
+            }
+        }
+    }
+    refreshPauseButton();
 }
 
 void MainWindow::wirePowerButton()
@@ -113,6 +161,10 @@ void MainWindow::wirePowerButton()
         m_powerStarting = false;
         m_powerStartTimer->stop();
         refreshPowerButton();
+        // A pause ends with the connection; a new one starts unpaused.
+        if (!connected)
+            setDisplayPaused(false);
+        refreshPauseButton();
     });
     connect(&m_radioModel, &RadioModel::connectionError, this, [this](const QString&) {
         m_powerStarting = false;
@@ -120,6 +172,11 @@ void MainWindow::wirePowerButton()
         refreshPowerButton();
     });
     refreshPowerButton();
+
+    connect(m_titleBar, &TitleBar::pauseRequested, this, [this](bool pause) {
+        setDisplayPaused(pause);
+    });
+    refreshPauseButton();
 }
 
 }  // namespace AetherSDR

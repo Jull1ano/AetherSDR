@@ -151,6 +151,10 @@ public:
     // sets the state; a click only asks (powerRequested).
     enum class PowerState { Off, Starting, On };
     void setPowerState(PowerState state, const QString& toolTip);
+    // brick3-angelia: pause / resume beside POWER (freezes the spectrum and
+    // waterfall). MainWindow sets the state; a click only asks
+    // (pauseRequested). Not available while disconnected.
+    void setPauseState(bool paused, bool available, const QString& toolTip);
 
     // Introspection for the automation bridge (`titlebar` model): the whole
     // bar — geometry, brand, tabs, audio cluster, window controls.
@@ -180,6 +184,8 @@ signals:
     void connectManuallyRequested();
     // POWER was clicked: on = connect to the radio, off = disconnect.
     void powerRequested(bool on);
+    // Pause clicked: true = freeze the display, false = resume.
+    void pauseRequested(bool pause);
 
 public:
     // Open the feature-request dialog.  Wired from Help → Submit your idea…
@@ -230,6 +236,8 @@ private:
     QPushButton* m_updateBadge{nullptr};
     QPushButton* m_powerBtn{nullptr};
     PowerState m_powerState{PowerState::Off};
+    QPushButton* m_pauseBtn{nullptr};
+    bool m_paused{false};
     QString m_stagedVersion;
     QString      m_updateVersion;
     void refreshUpdateBadge();

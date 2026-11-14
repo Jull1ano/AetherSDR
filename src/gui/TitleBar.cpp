@@ -24,6 +24,7 @@
 #include <QIcon>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPen>
 #include <QPaintEvent>
 #include <QPixmap>
 #include <QVBoxLayout>
@@ -63,6 +64,47 @@ namespace AetherSDR {
 
 namespace {
 constexpr const char* kTitleDragHandleProperty = "aetherTitleDragHandle";
+
+// brick3-angelia: the glyphs of the POWER and pause buttons, painted (no
+// font carries them reliably): the power symbol, two pause bars, a play
+// triangle. 16 x 16 logical, drawn at 2x so they stay crisp when scaled.
+enum class TitleGlyph { Power, Pause, Play };
+
+QIcon titleGlyphIcon(TitleGlyph glyph, const QColor& colour)
+{
+    constexpr qreal kDpr = 2.0;
+    QPixmap pm(QSize(16, 16) * kDpr);
+    pm.setDevicePixelRatio(kDpr);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing);
+    switch (glyph) {
+    case TitleGlyph::Power: {
+        p.setPen(QPen(colour, 1.8, Qt::SolidLine, Qt::RoundCap));
+        p.setBrush(Qt::NoBrush);
+        // A ring open at the top (from 120 deg round to 60 deg), and the bar
+        // standing in the gap.
+        p.drawArc(QRectF(2.6, 3.2, 10.8, 10.8), 120 * 16, 300 * 16);
+        p.drawLine(QPointF(8.0, 1.6), QPointF(8.0, 8.2));
+        break;
+    }
+    case TitleGlyph::Pause:
+        p.setPen(Qt::NoPen);
+        p.setBrush(colour);
+        p.drawRoundedRect(QRectF(4.0, 3.0, 3.0, 10.0), 0.8, 0.8);
+        p.drawRoundedRect(QRectF(9.0, 3.0, 3.0, 10.0), 0.8, 0.8);
+        break;
+    case TitleGlyph::Play: {
+        p.setPen(Qt::NoPen);
+        p.setBrush(colour);
+        const QPointF tri[] = {{5.0, 2.8}, {13.2, 8.0}, {5.0, 13.2}};
+        p.drawPolygon(tri, 3);
+        break;
+    }
+    }
+    p.end();
+    return QIcon(pm);
+}
 
 // Stall timeout for the GitHub latest-release version check (#4688 §6).
 constexpr int kTransferTimeoutMs = 15000;
@@ -232,22 +274,22 @@ TitleBar::TitleBar(QWidget* parent)
     // ── brick3-angelia: POWER, as Thetis has it ─────────────────────────────
     // Starts and stops the radio: on connects to the last radio, off
     // disconnects. The button shows what the radio is doing, not the click.
-    m_powerBtn = new QPushButton(QStringLiteral("POWER"), this);
+    // A small square with the power symbol; its colour carries the state.
+    m_powerBtn = new QPushButton(this);
     m_powerBtn->setObjectName(QStringLiteral("titlePowerButton"));
     m_powerBtn->setCheckable(true);
     m_powerBtn->setFocusPolicy(Qt::NoFocus);
-    m_powerBtn->setFixedSize(60, 26);
+    m_powerBtn->setFixedSize(26, 26);
+    m_powerBtn->setIconSize(QSize(16, 16));
     m_powerBtn->setCursor(Qt::PointingHandCursor);
     m_powerBtn->setAccessibleName(QStringLiteral("Power"));
     m_powerBtn->setStyleSheet(QStringLiteral(
         "QPushButton#titlePowerButton { background: #1a2a3a; border: 1px solid #304050;"
-        " border-radius: 3px; color: #8fa8c0; font-size: 11px; font-weight: bold;"
-        " padding: 0px 6px; }"
-        "QPushButton#titlePowerButton:checked { background: #1a6030; color: #ffffff;"
+        " border-radius: 3px; padding: 0px; }"
+        "QPushButton#titlePowerButton:checked { background: #1a6030;"
         " border: 1px solid #20a040; }"
         "QPushButton#titlePowerButton:hover { border: 1px solid #0090e0; }"
-        "QPushButton#titlePowerButton[starting=\"true\"] { color: #e0b040;"
-        " border: 1px solid #a07820; }"));
+        "QPushButton#titlePowerButton[starting=\"true\"] { border: 1px solid #a07820; }"));
     connect(m_powerBtn, &QPushButton::clicked, this, [this](bool) {
         const PowerState state = m_powerState;
         m_powerBtn->setChecked(state == PowerState::On);
@@ -257,6 +299,35 @@ TitleBar::TitleBar(QWidget* parent)
     });
     m_hbox->addWidget(m_powerBtn);
     setPowerState(PowerState::Off, QString());
+
+    // brick3-angelia: pause / resume beside POWER. Freezes the spectrum and
+    // the waterfall (and mutes this computer's audio) while the radio keeps
+    // running, e.g. to swap antennas; resume carries on under the frozen
+    // rows. MainWindow sets the state; a click only asks.
+    m_pauseBtn = new QPushButton(this);
+    m_pauseBtn->setObjectName(QStringLiteral("titlePauseButton"));
+    m_pauseBtn->setCheckable(true);
+    m_pauseBtn->setFocusPolicy(Qt::NoFocus);
+    m_pauseBtn->setFixedSize(26, 26);
+    m_pauseBtn->setIconSize(QSize(16, 16));
+    m_pauseBtn->setCursor(Qt::PointingHandCursor);
+    m_pauseBtn->setAccessibleName(QStringLiteral("Pause display"));
+    m_pauseBtn->setStyleSheet(QStringLiteral(
+        "QPushButton#titlePauseButton { background: #1a2a3a; border: 1px solid #304050;"
+        " border-radius: 3px; padding: 0px; }"
+        "QPushButton#titlePauseButton:checked { background: #5a3a0a;"
+        " border: 1px solid #e0a000; }"
+        "QPushButton#titlePauseButton:hover { border: 1px solid #0090e0; }"
+        "QPushButton#titlePauseButton:disabled { background: #141e28;"
+        " border: 1px solid #243040; }"));
+    connect(m_pauseBtn, &QPushButton::clicked, this, [this](bool) {
+        const bool paused = m_paused;
+        m_pauseBtn->setChecked(paused);
+        emit pauseRequested(!paused);
+    });
+    m_hbox->addSpacing(3);
+    m_hbox->addWidget(m_pauseBtn);
+    setPauseState(false, false, QString());
 
     // ── 3. Radio tabs ───────────────────────────────────────────────────────
     m_radioTabs = new RadioTabBar(this);
@@ -1834,6 +1905,7 @@ void TitleBar::setMinimalMode(bool on)
     if (m_dspStrip) m_dspStrip->setVisible(!on);
     if (m_vfoStrip) m_vfoStrip->setVisible(!on);
     if (m_powerBtn) m_powerBtn->setVisible(!on);
+    if (m_pauseBtn) m_pauseBtn->setVisible(!on);
     m_pcBtn->setVisible(!on);
     m_speakerBtn->setVisible(!on);
     m_headphoneBtn->setVisible(!on);
@@ -1865,6 +1937,10 @@ void TitleBar::setPowerState(PowerState state, const QString& toolTip)
     if (!m_powerBtn)
         return;
     m_powerBtn->setChecked(state == PowerState::On);
+    const QColor glyph = state == PowerState::On ? QColor(0xff, 0xff, 0xff)
+                       : state == PowerState::Starting ? QColor(0xe0, 0xb0, 0x40)
+                                                       : QColor(0x8f, 0xa8, 0xc0);
+    m_powerBtn->setIcon(titleGlyphIcon(TitleGlyph::Power, glyph));
     const bool starting = state == PowerState::Starting;
     if (m_powerBtn->property("starting").toBool() != starting) {
         m_powerBtn->setProperty("starting", starting);
@@ -1873,6 +1949,25 @@ void TitleBar::setPowerState(PowerState state, const QString& toolTip)
     }
     m_powerBtn->setToolTip(toolTip);
     m_powerBtn->setAccessibleDescription(toolTip);
+}
+
+void TitleBar::setPauseState(bool paused, bool available, const QString& toolTip)
+{
+    m_paused = paused;
+    if (!m_pauseBtn)
+        return;
+    m_pauseBtn->setEnabled(available);
+    m_pauseBtn->setChecked(paused);
+    // Paused shows play (what a click does next) in amber; running shows the
+    // pause bars.
+    const QColor glyph = !available ? QColor(0x4a, 0x5a, 0x6a)
+                       : paused ? QColor(0xff, 0xd0, 0x70)
+                                : QColor(0x8f, 0xa8, 0xc0);
+    m_pauseBtn->setIcon(titleGlyphIcon(paused ? TitleGlyph::Play : TitleGlyph::Pause, glyph));
+    m_pauseBtn->setAccessibleName(paused ? QStringLiteral("Resume display")
+                                         : QStringLiteral("Pause display"));
+    m_pauseBtn->setToolTip(toolTip);
+    m_pauseBtn->setAccessibleDescription(toolTip);
 }
 
 } // namespace AetherSDR

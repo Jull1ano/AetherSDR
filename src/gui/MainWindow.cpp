@@ -4200,6 +4200,8 @@ void MainWindow::changeEvent(QEvent* event)
 void MainWindow::closeEvent(QCloseEvent* event)
 {
     m_pendingDisplayWrites.flush();
+    // brick3-angelia: a pause must not leave the audio muted for next time.
+    setDisplayPaused(false);
     ShutdownTrace closeEventTrace("main_window.close_event");
 #ifdef Q_OS_MACOS
     // Shared Ulanzi access temporarily remaps only the dial's system key

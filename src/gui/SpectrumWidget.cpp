@@ -8727,9 +8727,19 @@ void SpectrumWidget::setSliceInfo(int sliceId, bool isTxSlice)
     if (idx >= 0) { m_sliceOverlays[idx].isTxSlice = isTxSlice; markOverlayDirty(); }
 }
 
+void SpectrumWidget::setDisplayFrozen(bool frozen)
+{
+    if (m_displayFrozen == frozen)
+        return;
+    m_displayFrozen = frozen;
+    update();
+}
+
 void SpectrumWidget::updateSpectrum(const QVector<float>& binsDbm, const SpectrumDecodeScale& decodeScale,
                                     bool heldForPresentation)
 {
+    if (m_displayFrozen)
+        return;   // paused from the title bar: keep what is on screen
     ++m_fftFrameSequence;
     PerfUpdateScope perfScope(PerfUpdateScope::Kind::Panadapter);
     m_panStats.updateSpectrumCalls++;
@@ -8944,6 +8954,8 @@ void SpectrumWidget::updateWaterfallRow(const QVector<float>& binsIntensity,
                                         double lowFreqMhz, double highFreqMhz,
                                         quint32 timecode, bool coherentSpectrumCoverage)
 {
+    if (m_displayFrozen)
+        return;   // paused from the title bar
     PerfUpdateScope perfScope(PerfUpdateScope::Kind::Waterfall);
     // Native waterfall tiles carry intensity values (int16/128.0f, ~96-120 on HF).
     if (binsIntensity.isEmpty()) return;
@@ -9662,6 +9674,8 @@ void SpectrumWidget::updateKiwiSdrWaterfallRow(const QVector<float>& binsDbm,
                                                double highFreqMhz,
                                                quint32 timecode)
 {
+    if (m_displayFrozen)
+        return;   // paused from the title bar
     Q_UNUSED(timecode);
     if (binsDbm.isEmpty()) {
         return;

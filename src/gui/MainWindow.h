@@ -2147,6 +2147,13 @@ private:
     void refreshPowerButton();
     bool m_powerStarting{false};
     QTimer* m_powerStartTimer{nullptr};
+    // brick3-angelia: the title bar's pause (MainWindow_Power.cpp). Freezes
+    // every panadapter's spectrum and waterfall and mutes this computer's
+    // audio; resume, a disconnect or closing the window undoes both.
+    void setDisplayPaused(bool paused);
+    void refreshPauseButton();
+    bool m_displayPaused{false};
+    bool m_pauseMutedAudio{false};   // the pause, not the operator, muted it
     QMetaObject::Connection m_activeModeConn;     // active-slice mode → quick VFO dwell
     QMetaObject::Connection m_activeFilterConn;   // active-slice filter → quick VFO dwell
     class ClientCompEditor* m_clientCompEditor{nullptr}; // lazy — created on first Edit… click
