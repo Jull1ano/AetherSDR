@@ -9,7 +9,6 @@
 #include "TxKeyActivationGuard.h"
 #include "PttHoldKeyStep.h"
 #include "ShortcutRefusalNotice.h"
-#include "StatusBarNotice.h"
 #include "TwoToneTuneGate.h"
 #include "core/IambicKeyer.h"
 
@@ -387,18 +386,9 @@ void MainWindow::noticeRefusedShortcut(QKeyEvent* keyEvent)
     qCInfo(lcGui).noquote() << "Keyboard shortcuts are off:" << refused->displayName
                             << "(" + refused->currentKey.toString() + ") not run;"
                             << "Settings > Keyboard Shortcuts turns them on";
-    if (!m_shortcutNoticeLabel) {
-        m_shortcutNoticeLabel = new StatusBarNoticeLabel(statusBar());
-        // The right margin clears the resize grip that overlays the bar.
-        m_shortcutNoticeLabel->setContentsMargins(6, 0, 20, 0);
-        ThemeManager::instance().applyStyleSheet(
-            m_shortcutNoticeLabel,
-            QStringLiteral("QLabel#statusBarNoticeLabel { color: {{color.text.primary}};"
-                           " font-size: 14px; background: transparent; }"));
-    }
-    m_shortcutNoticeLabel->showNotice(
-        tr("Keyboard shortcuts are off"),
-        10000);
+    // #7208: status messages go through the status bar's own overlay,
+    // which neither moves controls nor grows the window.
+    statusBar()->showMessage(tr("Keyboard shortcuts are off"), 10000);
 }
 
 
