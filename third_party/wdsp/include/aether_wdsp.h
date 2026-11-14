@@ -536,6 +536,20 @@ void SetDisplayNormOneHz(int disp, int pixout, int norm);
 // FFTW_ESTIMATE instead of FFTW_PATIENT, so a new FFT size costs milliseconds
 // and may be planned on the feeding thread. Call before SetAnalyzer.
 void SetDisplayPlanEstimate(int disp, int estimate);
+// AetherSDR patch 25 (retune rotation): with it on, every LO change given by
+// SetAnalyzerLo() is marked in the input stream `latencyMs` later, and the
+// samples of an FFT window taken before the last change are rotated onto the
+// newest LO, so a frame stays coherent while a drag moves the DDC.
+// `iqRateHz` is the real input rate (the display "sample rate" may be set to
+// something else for level normalisation). GetPixelsRetune() is GetPixels()
+// plus the frame's tag: the LO it is computed for (Hz, 0 = unknown) and the
+// part of the band its samples cover, Hz relative to that LO (vlo > vhi:
+// drop the frame). Call SetAnalyzerLo() from the thread that feeds Spectrum0,
+// with the samples received but not yet passed to it as pendingSamples.
+void SetAnalyzerRetune(int disp, int enable, double iqRateHz, double latencyMs);
+void SetAnalyzerLo(int disp, double loHz, int pendingSamples);
+void GetPixelsRetune(int disp, int pixout, float* pixels, int* flag,
+                     double* loHz, double* validLowHz, double* validHighHz);
 
 int GetWDSPVersion(void);
 

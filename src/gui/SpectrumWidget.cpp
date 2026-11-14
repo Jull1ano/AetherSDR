@@ -111,6 +111,45 @@ QSoundEffect* SpectrumWidget::s_starstruckSound = nullptr;
 
 namespace {
 
+// brick3-angelia: a spectrum frame whose points run from frameLowMhz to
+// frameHighMhz (end points on the edges), read onto `count` points over
+// viewLowMhz..viewHighMhz the same way. Linear between neighbours; points the
+// frame does not reach take its noise floor (20th percentile), the least
+// surprising thing to draw at an edge a drag has just uncovered.
+QVector<float> reprojectFrameBins(const QVector<float>& in, double frameLowMhz,
+                                  double frameHighMhz, double viewLowMhz,
+                                  double viewHighMhz)
+{
+    const int n = in.size();
+    QVector<float> out(n);
+    if (n < 2 || !(frameHighMhz > frameLowMhz) || !(viewHighMhz > viewLowMhz)) {
+        return in;
+    }
+    float floorDb = 0.0f;
+    bool haveFloor = false;
+    const double last = static_cast<double>(n - 1);
+    const double scale = last / (frameHighMhz - frameLowMhz);
+    for (int i = 0; i < n; ++i) {
+        const double mhz = viewLowMhz + (viewHighMhz - viewLowMhz) * i / last;
+        const double x = (mhz - frameLowMhz) * scale;
+        if (x < -1e-6 || x > last + 1e-6) {
+            if (!haveFloor) {
+                QVector<float> sorted(in);
+                auto k = sorted.begin() + sorted.size() / 5;
+                std::nth_element(sorted.begin(), k, sorted.end());
+                floorDb = *k;
+                haveFloor = true;
+            }
+            out[i] = floorDb;
+            continue;
+        }
+        const int j = std::clamp(static_cast<int>(x), 0, n - 2);
+        const float t = static_cast<float>(std::clamp(x - j, 0.0, 1.0));
+        out[i] = in[j] + t * (in[j + 1] - in[j]);
+    }
+    return out;
+}
+
 constexpr int kDssMaxIncrementalUploadRows = 8;
 constexpr qint64 kDssFftPixelScaleSettleMs = 750;
 
@@ -8740,6 +8779,30 @@ void SpectrumWidget::updateSpectrum(const QVector<float>& binsDbm, const Spectru
 {
     if (m_displayFrozen)
         return;   // paused from the title bar: keep what is on screen
+    // brick3-angelia: a frame that says which RF span it was computed for
+    // (a host-DSP backend; SpectrumDecodeScale::frameLowMhz/HighMhz) is read
+    // onto the view on screen first. Under a drag the view moves with the
+    // mouse while a frame still covers the span it was made for; drawn
+    // as-is it would jump back by the difference on every frame -- the
+    // wobble -- and only catch up when the drag stops.
+    if (decodeScale.frameLowMhz > 0.0 && decodeScale.frameHighMhz > decodeScale.frameLowMhz
+        && m_bandwidthMhz > 0.0 && binsDbm.size() >= 2) {
+        const double viewLow = m_centerMhz - m_bandwidthMhz / 2.0;
+        const double viewHigh = m_centerMhz + m_bandwidthMhz / 2.0;
+        const double tolerance = 0.25 * m_bandwidthMhz / binsDbm.size();
+        SpectrumDecodeScale plain = decodeScale;
+        plain.frameLowMhz = 0.0;
+        plain.frameHighMhz = 0.0;
+        if (std::abs(viewLow - decodeScale.frameLowMhz) > tolerance
+            || std::abs(viewHigh - decodeScale.frameHighMhz) > tolerance) {
+            updateSpectrum(reprojectFrameBins(binsDbm, decodeScale.frameLowMhz,
+                                              decodeScale.frameHighMhz, viewLow, viewHigh),
+                           plain, heldForPresentation);
+        } else {
+            updateSpectrum(binsDbm, plain, heldForPresentation);
+        }
+        return;
+    }
     ++m_fftFrameSequence;
     PerfUpdateScope perfScope(PerfUpdateScope::Kind::Panadapter);
     m_panStats.updateSpectrumCalls++;

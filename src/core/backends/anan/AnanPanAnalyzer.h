@@ -60,6 +60,20 @@ public:
         // numPoints follows the zoom, so the noise floor does not move when
         // the view is zoomed (Thetis's "1 Hz BW" behaviour).
         int normPoints = 0;
+        // brick3-angelia: the time from a DDC frequency going out to the first
+        // sample taken at it (WDSP patch 25's retune rotation; see setLo()).
+        // AETHER_ANAN_RETUNE_LATENCY_MS overrides it for a bench.
+        double retuneLatencyMs = 2.5;
+    };
+
+    // What a frame is computed for (WDSP patch 25): the DDC frequency its
+    // samples were rotated onto, and the part of the band they all cover, Hz
+    // relative to that frequency. loHz 0 = not known (no setLo() yet).
+    struct FrameTag {
+        double loHz = 0.0;
+        double validLowHz = -1.0e12;
+        double validHighHz = 1.0e12;
+        [[nodiscard]] bool empty() const noexcept { return validLowHz > validHighHz; }
     };
 
     static constexpr int kDefaultWindow = 5;
@@ -149,7 +163,18 @@ public:
     // If the analyzer has produced a frame since the last call, copy it into
     // `pointsDb` (resized to numPoints(), dB, lowest frequency first) and
     // return true. Returns false, leaving `pointsDb` untouched, otherwise.
-    bool takeFrame(std::vector<float>& pointsDb);
+    // `tag`, when given, receives the frame's FrameTag. A frame whose samples
+    // cover too little of the band (a long jump inside one FFT) comes with an
+    // empty tag; the caller should drop it.
+    bool takeFrame(std::vector<float>& pointsDb, FrameTag* tag = nullptr);
+
+    // brick3-angelia: the DDC frequency just sent to the radio, Hz. Call on
+    // the feeding thread at the moment it goes out (P2Client's thread, in
+    // order with the IQ). WDSP marks the change in the input stream
+    // retuneLatencyMs later and rotates older samples of an FFT window onto
+    // the newest frequency, so a drag that moves the DDC does not smear or
+    // double the spectrum (after the Jull1ano Thetis fork's smooth pan).
+    void setLo(double hz) noexcept;
 
     // The derived analyzer parameters for a given setting -- exposed so tests
     // can pin the formulas without a running analyzer.
@@ -177,6 +202,7 @@ private:
     std::vector<double> m_staged;          // interleaved I,Q -- 2 * kBlockSize
     std::size_t m_stagedCount = 0;         // complex samples in m_staged
     std::vector<float> m_scratch;          // GetPixels target, numPoints
+    double m_loHz = 0.0;                   // the last setLo()
 };
 
 }  // namespace AetherSDR::anan

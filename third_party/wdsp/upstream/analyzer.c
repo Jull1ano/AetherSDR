@@ -590,6 +590,19 @@ void stitch(int disp)
 		avenger (a->av_mode[i], a->num_pixels, &a->avail_frames[i], a->num_average[i], &a->av_in_idx[i], &a->av_out_idx[i],
 			a->av_backmult[i], a->scale, a->t_pixels[i], a->av_sum[i], a->av_buff[i], a->cd, a->normalize[i], a->norm_oneHz,
 			a->pixels[i][a->w_pix_buff[i]]);
+		// AetherSDR patch 25: the frame's tag travels with its pixel buffer
+		if (a->num_stitch == 1 && a->num_fft == 1)
+		{
+			a->rt_pix_lo[i][a->w_pix_buff[i]] = a->rt_fi_lo[a->begin_ss][0];
+			a->rt_pix_vlo[i][a->w_pix_buff[i]] = a->rt_fi_vlo[a->begin_ss][0];
+			a->rt_pix_vhi[i][a->w_pix_buff[i]] = a->rt_fi_vhi[a->begin_ss][0];
+		}
+		else
+		{
+			a->rt_pix_lo[i][a->w_pix_buff[i]] = 0.0;
+			a->rt_pix_vlo[i][a->w_pix_buff[i]] = -1.0e12;
+			a->rt_pix_vhi[i][a->w_pix_buff[i]] = 1.0e12;
+		}
 		LeaveCriticalSection(&a->ResampleSection);
 
 		EnterCriticalSection(&a->PB_ControlsSection[i]);
@@ -838,6 +851,133 @@ double GetDetectMaxBin(int disp)
 *																										*
 ********************************************************************************************************/
 
+// AetherSDR patch 25: copy the window into Cfft_in[ss][LO], rotating the
+// samples taken before the last LO change onto the newest LO (ported from the
+// Jull1ano Thetis fork's sm_fill_window). Records the frame's tag in
+// rt_fi_*[ss][LO].
+static void rt_fill_window(DP a, int ss, int LO)
+{
+	static const double TWOPI_ = 6.283185307179586476925286766559;
+	long long ws = a->rt_win_start[ss][LO];
+	int size = a->size;
+	int i, m, nev = 0, start, end, idx = a->IQO_idx[ss][LO];
+	long long eidx[dMAX_RETUNE_EV];
+	double elo[dMAX_RETUNE_EV];
+	double Fs[dMAX_RETUNE_EV + 1], Gs[dMAX_RETUNE_EV + 1];
+	double lo0, lo_m, lo_m1, Fmax = 0.0, Fmin = 0.0, F, half, fs = a->rt_fs;
+	double sgn = a->flip[LO] ? 1.0 : -1.0;
+	int skip = 0;
+	dINREAL* I = a->I_samples[ss][LO];
+	dINREAL* Q = a->Q_samples[ss][LO];
+	fftw_complex* out = a->Cfft_in[ss][LO];
+
+	EnterCriticalSection(&a->RetuneSection);
+	while (a->rt_ev_count > 0 && a->rt_ev_idx[0] <= ws)
+	{
+		a->rt_base_lo = a->rt_ev_lo[0];
+		a->rt_ev_count--;
+		memmove(a->rt_ev_idx, a->rt_ev_idx + 1, a->rt_ev_count * sizeof(long long));
+		memmove(a->rt_ev_lo, a->rt_ev_lo + 1, a->rt_ev_count * sizeof(double));
+	}
+	lo0 = a->rt_base_lo;
+	for (m = 0; m < a->rt_ev_count && a->rt_ev_idx[m] < ws + size; m++)
+	{
+		eidx[nev] = a->rt_ev_idx[m] - ws;
+		elo[nev] = a->rt_ev_lo[m];
+		nev++;
+	}
+	LeaveCriticalSection(&a->RetuneSection);
+
+	a->rt_fi_lo[ss][LO] = nev ? elo[nev - 1] : lo0;
+	half = 0.5 * fs * (double)(size - 2 * a->clip) / (double)size;
+	a->rt_fi_vlo[ss][LO] = -1.0e12;
+	a->rt_fi_vhi[ss][LO] = 1.0e12;
+
+	if (nev > 0 && fs > 0.0)
+	{
+		// Fs[m]: rotation frequency (Hz) of segment m = newest LO - LO of segment m
+		// Gs[m]: sum of (LO step * step position) over the steps after segment m,
+		// so phase(s) = sgn*2pi/fs*(Fs*s - Gs), continuous across the steps
+		Fs[nev] = 0.0;
+		Gs[nev] = 0.0;
+		for (m = nev - 1; m >= 0; m--)
+		{
+			lo_m = (m == 0) ? lo0 : elo[m - 1];
+			lo_m1 = elo[m];
+			F = lo_m1 - lo_m;
+			Fs[m] = Fs[m + 1] + F;
+			Gs[m] = Gs[m + 1] + F * (double)eidx[m];
+			if (Fs[m] > Fmax) Fmax = Fs[m];
+			if (Fs[m] < Fmin) Fmin = Fs[m];
+		}
+		// segment m covers [lo_m - half, lo_m + half], i.e. [-Fs[m] - half, -Fs[m] + half]
+		// around the newest LO; the frame is valid where every segment reaches
+		a->rt_fi_vlo[ss][LO] = -Fmin - half;
+		a->rt_fi_vhi[ss][LO] = -Fmax + half;
+		if (a->rt_fi_vhi[ss][LO] - a->rt_fi_vlo[ss][LO] < 0.1 * fs)
+		{
+			skip = 1;
+			a->rt_fi_vlo[ss][LO] = 1.0e12;		// too little left: the reader drops this frame
+			a->rt_fi_vhi[ss][LO] = -1.0e12;
+		}
+	}
+
+	if (nev == 0 || skip)
+	{
+		for (i = 0; i < size; i++)
+		{
+			out[i][0] = a->window[i] * (double)I[idx];
+			out[i][1] = a->window[i] * (double)Q[idx];
+			if (++idx >= a->bsize) idx -= a->bsize;
+		}
+	}
+	else
+	{
+		for (m = 0; m <= nev; m++)
+		{
+			start = (m == 0) ? 0 : (int)eidx[m - 1];
+			end = (m == nev) ? size : (int)eidx[m];
+			if (start < 0) start = 0;
+			if (end > size) end = size;
+			if (Fs[m] == 0.0)
+			{
+				for (i = start; i < end; i++)
+				{
+					out[i][0] = a->window[i] * (double)I[idx];
+					out[i][1] = a->window[i] * (double)Q[idx];
+					if (++idx >= a->bsize) idx -= a->bsize;
+				}
+			}
+			else
+			{
+				double w = sgn * TWOPI_ * Fs[m] / fs;
+				double cw = cos(w), sw = sin(w);
+				double c = 1.0, s = 0.0, t, xi, xq;
+				for (i = start; i < end; i++)
+				{
+					if (((i - start) & 1023) == 0)
+					{
+						// re-anchor the recursive oscillator every 1024 samples
+						double ph = sgn * TWOPI_ / fs * (Fs[m] * (double)i - Gs[m]);
+						ph = fmod(ph, TWOPI_);
+						c = cos(ph);
+						s = sin(ph);
+					}
+					xi = (double)I[idx];
+					xq = (double)Q[idx];
+					out[i][0] = a->window[i] * (xi * c - xq * s);
+					out[i][1] = a->window[i] * (xi * s + xq * c);
+					t = c;
+					c = t * cw - s * sw;
+					s = t * sw + s * cw;
+					if (++idx >= a->bsize) idx -= a->bsize;
+				}
+			}
+		}
+	}
+	a->IQO_idx[ss][LO] = idx;
+}
+
 DWORD WINAPI Cspectra (void *pargs)
 {
 	int i, j;
@@ -855,12 +995,21 @@ DWORD WINAPI Cspectra (void *pargs)
 
 	if ((ss >= a->begin_ss) && (ss <= a->end_ss))
 	{
+		// AetherSDR patch 25: rotate across LO changes when that is on
+		if (a->rt_enable && a->rt_lo_valid && a->num_stitch == 1 && a->num_fft == 1)
+			rt_fill_window(a, ss, LO);
+		else
+		{
+		a->rt_fi_lo[ss][LO] = 0.0;
+		a->rt_fi_vlo[ss][LO] = -1.0e12;
+		a->rt_fi_vhi[ss][LO] = 1.0e12;
 		for (i = 0; i < a->size; i++)
 		{
 			(a->Cfft_in[ss][LO])[i][0] = a->window[i] * (double)((a->I_samples[ss][LO])[a->IQO_idx[ss][LO]]);
 			(a->Cfft_in[ss][LO])[i][1] = a->window[i] * (double)((a->Q_samples[ss][LO])[a->IQO_idx[ss][LO]]);
 			if(++a->IQO_idx[ss][LO] >= a->bsize)
 				 a->IQO_idx[ss][LO] -= a->bsize;
+		}
 		}
 
 		if (InterlockedAnd(&a->stop, 1))
@@ -1082,6 +1231,8 @@ void __cdecl sendbuf(void *arg)
 					// at the wrong span of the ring.
 					EnterCriticalSection(&(a->BufferControlSection[a->ss][a->LO]));
 					a->IQO_idx[a->ss][a->LO] = a->IQout_index[a->ss][a->LO];
+					// AetherSDR patch 25: absolute index of this window's first sample
+					a->rt_win_start[a->ss][a->LO] = a->rt_in_count[a->ss][a->LO] - a->have_samples[a->ss][a->LO];
 					if((a->IQout_index[a->ss][a->LO] += a->incr) >= a->bsize)
 						a->IQout_index[a->ss][a->LO] -= a->bsize;
 					if ((a->have_samples[a->ss][a->LO] -= a->incr) < a->size)
@@ -1356,6 +1507,7 @@ void XCreateAnalyzer(	int disp,
 			a->snap[i][j] = 0;
 		}
 	InitializeCriticalSectionAndSpinCount(&a->ResampleSection, 0);
+	InitializeCriticalSectionAndSpinCount(&a->RetuneSection, 0);	// AetherSDR patch 25
 	InitializeCriticalSectionAndSpinCount(&a->SetAnalyzerSection, 0);
 	InitializeCriticalSectionAndSpinCount(&a->StitchSection, 0);
 	for (i = 0; i < dMAX_PIXOUTS; i++)
@@ -1501,6 +1653,7 @@ void DestroyAnalyzer(int disp)
 	DeleteCriticalSection(&a->StitchSection);
 	DeleteCriticalSection(&a->SetAnalyzerSection);
 	DeleteCriticalSection(&a->ResampleSection);
+	DeleteCriticalSection(&a->RetuneSection);	// AetherSDR patch 25
 
 	for (i = 0; i < a->max_stitch; i++)
 		for (j = 0; j < a->max_num_fft; j++)
@@ -1532,6 +1685,31 @@ void GetPixels	(	int disp,
 		memcpy (pix, a->pixels[pixout][a->r_pix_buff[pixout]], a->num_pixels * sizeof(dOUTREAL));
 		*flag = 1;
 		InterlockedBitTestAndReset(&(a->pb_ready[pixout][a->r_pix_buff[pixout]]), 0);
+	}
+	else
+		*flag = 0;
+}
+
+// AetherSDR patch 25: see analyzer.h.
+PORT
+void GetPixelsRetune(int disp, int pixout, dOUTREAL *pix, int *flag,
+					 double *lo_hz, double *vlo_hz, double *vhi_hz)
+{
+	DP a = pdisp[disp];
+	int r;
+	EnterCriticalSection(&a->PB_ControlsSection[pixout]);
+		a->r_pix_buff[pixout] = a->last_pix_buff[pixout];
+	LeaveCriticalSection(&a->PB_ControlsSection[pixout]);
+	r = a->r_pix_buff[pixout];
+
+	if (_InterlockedAnd(&(a->pb_ready[pixout][r]), 1))
+	{
+		memcpy (pix, a->pixels[pixout][r], a->num_pixels * sizeof(dOUTREAL));
+		*lo_hz = a->rt_pix_lo[pixout][r];
+		*vlo_hz = a->rt_pix_vlo[pixout][r];
+		*vhi_hz = a->rt_pix_vhi[pixout][r];
+		*flag = 1;
+		InterlockedBitTestAndReset(&(a->pb_ready[pixout][r]), 0);
 	}
 	else
 		*flag = 0;
@@ -1765,6 +1943,7 @@ void Spectrum0(int run, int disp, int ss, int LO, double* pbuff)
 					 	a->IQout_index[ss][LO] -= a->bsize;
 					a->have_samples[ss][LO] = a->max_writeahead;
 				}
+			a->rt_in_count[ss][LO] += a->buff_size;	// AetherSDR patch 25
 			if ((a->have_samples[ss][LO] += a->buff_size) >= a->size)
 				InterlockedBitTestAndSet(&(a->buff_ready[ss][LO]), 0);
 		LeaveCriticalSection(&(a->BufferControlSection[ss][LO]));
@@ -1860,6 +2039,62 @@ void SetDisplayPlanEstimate (int disp, int estimate)
 {
 	DP a = pdisp[disp];
 	a->plan_estimate = estimate ? 1 : 0;
+}
+
+// AetherSDR patch 25: see AETHERSDR-PATCHES.md.
+PORT
+void SetAnalyzerRetune (int disp, int enable, double iq_rate_hz, double latency_ms)
+{
+	DP a = pdisp[disp];
+	EnterCriticalSection(&a->RetuneSection);
+	a->rt_enable = enable ? 1 : 0;
+	a->rt_fs = iq_rate_hz > 0.0 ? iq_rate_hz : 0.0;
+	a->rt_lat_ms = latency_ms > 0.0 ? latency_ms : 0.0;
+	if (!a->rt_enable || a->rt_fs <= 0.0)
+	{
+		a->rt_ev_count = 0;		// nothing to rotate any more
+		a->rt_lo_valid = 0;
+	}
+	LeaveCriticalSection(&a->RetuneSection);
+}
+
+// AetherSDR patch 25: see AETHERSDR-PATCHES.md.
+PORT
+void SetAnalyzerLo (int disp, double lo_hz, int pending_samples)
+{
+	DP a = pdisp[disp];
+	long long now;
+	EnterCriticalSection(&(a->BufferControlSection[0][0]));
+	now = a->rt_in_count[0][0] + (pending_samples > 0 ? pending_samples : 0);
+	LeaveCriticalSection(&(a->BufferControlSection[0][0]));
+	EnterCriticalSection(&a->RetuneSection);
+	if (!a->rt_enable || a->rt_fs <= 0.0 || !a->rt_lo_valid)
+	{
+		// first LO, or rotation off: nothing older to rotate
+		a->rt_ev_count = 0;
+		a->rt_base_lo = lo_hz;
+		a->rt_lo_valid = a->rt_enable && a->rt_fs > 0.0;
+	}
+	else
+	{
+		double newest = a->rt_ev_count ? a->rt_ev_lo[a->rt_ev_count - 1] : a->rt_base_lo;
+		if (lo_hz != newest)
+		{
+			if (a->rt_ev_count == dMAX_RETUNE_EV)
+			{
+				a->rt_base_lo = a->rt_ev_lo[0];
+				a->rt_ev_count--;
+				memmove(a->rt_ev_idx, a->rt_ev_idx + 1, a->rt_ev_count * sizeof(long long));
+				memmove(a->rt_ev_lo, a->rt_ev_lo + 1, a->rt_ev_count * sizeof(double));
+			}
+			a->rt_ev_idx[a->rt_ev_count] = now + llround(a->rt_lat_ms * 1.0e-3 * a->rt_fs);
+			if (a->rt_ev_count > 0 && a->rt_ev_idx[a->rt_ev_count] < a->rt_ev_idx[a->rt_ev_count - 1])
+				a->rt_ev_idx[a->rt_ev_count] = a->rt_ev_idx[a->rt_ev_count - 1];
+			a->rt_ev_lo[a->rt_ev_count] = lo_hz;
+			a->rt_ev_count++;
+		}
+	}
+	LeaveCriticalSection(&a->RetuneSection);
 }
 
 PORT

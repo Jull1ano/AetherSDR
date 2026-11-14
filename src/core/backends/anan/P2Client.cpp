@@ -413,6 +413,7 @@ void P2Client::setDdcFrequencyHz(int ddcIndex, double hz)
     if (m_running && m_socket) {
         sendRunningHighPriority();
     }
+    emit ddcFrequencySent(ddcIndex, hz);
 }
 
 void P2Client::setStepAttenuationDb(int adcIndex, int db)

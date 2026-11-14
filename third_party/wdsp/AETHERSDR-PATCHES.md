@@ -1322,3 +1322,43 @@ Marked `// AetherSDR patch 24:` in `upstream/analyzer.c` and `upstream/analyzer.
 **Upstream status.** Not reported.
 
 When updating WDSP, keep this unless upstream offers its own planner flag.
+
+## Patch 25 -- retune rotation: a panadapter drag that moves the DDC stays one clean spectrum (brick3-angelia)
+
+A drag at a wide view moves the DDC every few milliseconds, while one
+analyzer FFT window spans up to 683 ms (262144 points at 384 ksps). Each
+window then held samples taken at several DDC frequencies: every station
+showed several times ("fake doubles") and the trace wobbled until the drag
+stopped. Ported from the smooth pan / retune of the Jull1ano Thetis fork's
+`analyzer.c` (`sm_fill_window`, `SetPixelRef`), for one sub-span, one LO
+position and complex input:
+
+- `SetAnalyzerRetune(disp, enable, iq_rate_hz, latency_ms)` turns it on, with
+  the real input rate (the display "sample rate" can be repurposed for level
+  normalisation, as `AnanPanAnalyzer` does) and the time from a frequency
+  going out to its first sample.
+- `SetAnalyzerLo(disp, lo_hz, pending_samples)` is called on the feeding
+  thread the moment a new DDC frequency is sent; the change is marked in the
+  input stream at `rt_in_count + pending_samples + latency`. `Spectrum0()`
+  counts the input (`rt_in_count`), `sendbuf()` records each window's
+  absolute start (`rt_win_start`).
+- `Cspectra()` fills the FFT input through `rt_fill_window()`: samples taken
+  before the last change inside the window are rotated onto the newest LO,
+  phase continuous across the steps like the radio's NCO. The frame is
+  tagged with that LO and the part of the band every segment covers; a
+  window with less than a tenth of the band covered is tagged empty.
+- `stitch()` carries the tag with the pixel buffer and
+  `GetPixelsRetune()` returns it with the pixels.
+
+Off (`rt_enable` 0, the default from `malloc0`), the analyzer behaves as
+upstream. Tested offline with synthetic carriers through a stepping NCO
+(two carriers, 2 kHz steps every 25 ms, FFT 65536 and 262144): ghosts 129 dB
+below the carrier with the latency right, against misplaced carriers in most
+frames without the patch; a latency 1.5-6 ms off leaves a skirt about 21-25 dB
+down. Not yet measured on a radio.
+
+Marked `// AetherSDR patch 25` in `upstream/analyzer.c` and `upstream/analyzer.h`.
+
+**Upstream status.** Not reported.
+
+When updating WDSP, keep this unless upstream's analyzer learns about LO changes itself.

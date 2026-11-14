@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 
 // One line per settings change (FFT AVG, FPS, rate). Off by default -- it fires
 // on every slider step; enable with QT_LOGGING_RULES="aether.anan.pan.info=true".
@@ -191,6 +192,28 @@ void AnanPanAnalyzer::applySettings()
     SetDisplayNormOneHz(m_disp, 0, 1);
     SetDisplaySampleRate(m_disp, m_settings.normPoints > 0 ? m_settings.normPoints
                                                            : m_settings.numPoints);
+    // WDSP patch 25: retune rotation, with the real input rate (the display
+    // "sample rate" above is the point count). Its LO history survives
+    // SetAnalyzer(), which only empties the input ring.
+    double latencyMs = m_settings.retuneLatencyMs;
+    if (const char* env = std::getenv("AETHER_ANAN_RETUNE_LATENCY_MS")) {
+        const double v = std::atof(env);
+        if (v >= 0.0 && v <= 200.0)
+            latencyMs = v;
+    }
+    SetAnalyzerRetune(m_disp, 1, static_cast<double>(std::max(1, m_settings.sampleRateHz)),
+                      latencyMs);
+    if (m_loHz > 0.0)
+        SetAnalyzerLo(m_disp, m_loHz, 0);
+}
+
+void AnanPanAnalyzer::setLo(double hz) noexcept
+{
+    if (!(hz > 0.0) || !std::isfinite(hz))
+        return;
+    m_loHz = hz;
+    // The staged partial block was received before this change.
+    SetAnalyzerLo(m_disp, hz, static_cast<int>(m_stagedCount));
 }
 
 void AnanPanAnalyzer::applyAveraging()
@@ -356,14 +379,17 @@ std::size_t AnanPanAnalyzer::dropStagedPartial() noexcept
     return dropped;
 }
 
-bool AnanPanAnalyzer::takeFrame(std::vector<float>& pointsDb)
+bool AnanPanAnalyzer::takeFrame(std::vector<float>& pointsDb, FrameTag* tag)
 {
     // GetPixels copies straight into its argument, so read into a scratch
     // buffer and leave `pointsDb` untouched when there is no new frame.
     int flag = 0;
-    GetPixels(m_disp, 0, m_scratch.data(), &flag);
+    FrameTag t;
+    GetPixelsRetune(m_disp, 0, m_scratch.data(), &flag, &t.loHz, &t.validLowHz, &t.validHighHz);
     if (flag == 0)
         return false;
+    if (tag)
+        *tag = t;
     if (!m_seeded) {
         m_seeded = true;
         if (m_settings.averageTimeMs > 0)

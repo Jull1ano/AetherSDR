@@ -311,7 +311,21 @@ void AnanRxDsp::installChannel(RebuildResult result)
     // releases the id -- see RebuildResult.
     m_analyzer = std::move(result.analyzer);
     m_channel = std::move(result.channel);
+    // The new analyzer starts at the DDC frequency now (no history to rotate).
+    if (m_ddcLoHz > 0.0)
+        m_analyzer->setLo(m_ddcLoHz);
+    m_traceLoHz = 0.0;
     publishNoiseBlankerState();
+}
+
+void AnanRxDsp::onDdcRetuned(double hz)
+{
+    if (!(hz > 0.0))
+        return;
+    m_ddcLoHz = hz;
+    // The running analyzer, also mid-rebuild: it is still the one being fed.
+    if (m_analyzer)
+        m_analyzer->setLo(hz);
 }
 
 void AnanRxDsp::setMode(WdspChannel::Mode mode)
@@ -627,7 +641,7 @@ void AnanRxDsp::retargetAnalyzerIfSettled()
     retargetAnalyzer(*m_analyzer);
 }
 
-void AnanRxDsp::setPanView(double low, double high, int sampleRateHz)
+void AnanRxDsp::setPanView(double low, double high, int sampleRateHz, double loHz)
 {
     low = std::clamp(low, 0.0, 1.0);
     high = std::clamp(high, 0.0, 1.0);
@@ -637,11 +651,22 @@ void AnanRxDsp::setPanView(double low, double high, int sampleRateHz)
         // For the channel being built at that rate: installChannel() takes it.
         m_nextView = {low, high};
         m_nextViewRateHz = sampleRateHz;
+        if (loHz > 0.0)
+            m_config.panViewLoHz = loHz;
         return;
     }
     m_nextViewRateHz = 0;   // a view for the running rate supersedes a held one
-    if (low == m_config.panViewLow && high == m_config.panViewHigh)
+    const bool loMoved = loHz > 0.0 && loHz != m_config.panViewLoHz;
+    if (loHz > 0.0)
+        m_config.panViewLoHz = loHz;
+    if (low == m_config.panViewLow && high == m_config.panViewHigh) {
+        // Only the DDC moved under a view that kept its place in the band (a
+        // drag at the whole-band view): nothing to re-aim, but show the move
+        // now from the trace in hand (brick3-angelia).
+        if (loMoved && m_analyzer && !m_rebuildInFlight && m_traceValid)
+            publishSpectrum();
         return;
+    }
     m_config.panViewLow = low;
     m_config.panViewHigh = high;
     // Mid-rebuild the incoming analyzer picks the view up at install.
@@ -657,37 +682,60 @@ void AnanRxDsp::setPanView(double low, double high, int sampleRateHz)
 
 void AnanRxDsp::publishSpectrum()
 {
+    // The view is a place in absolute frequency (brick3-angelia): its
+    // fractions are of the band around panViewLoHz, and the trace sits at
+    // m_traceLoHz. While a retune is on its way the two differ, and the view
+    // is read where it really is in the trace -- the move shows at once and
+    // the spectrum stays put under it, instead of jumping by the step until
+    // the frames catch up.
+    const double rate = static_cast<double>(m_config.inputSampleRateHz);
+    double viewLow = m_config.panViewLow;
+    double viewHigh = m_config.panViewHigh;
+    if (m_config.panViewLoHz > 0.0 && m_traceLoHz > 0.0 && rate > 0.0) {
+        const double d = (m_config.panViewLoHz - m_traceLoHz) / rate;
+        viewLow += d;
+        viewHigh += d;
+    }
+    // The RF bounds of what goes out, for the display (0 = not known).
+    const double lo = m_config.panViewLoHz > 0.0 ? m_config.panViewLoHz : m_traceLoHz;
+    const double lowHz = (lo > 0.0 && rate > 0.0) ? lo + (m_config.panViewLow - 0.5) * rate : 0.0;
+    const double highHz = (lo > 0.0 && rate > 0.0) ? lo + (m_config.panViewHigh - 0.5) * rate : 0.0;
+
     const bool isView = m_trace.size() == static_cast<std::size_t>(m_config.panPoints)
-        && std::abs(m_traceWindow.low - m_config.panViewLow) < 1e-9
-        && std::abs(m_traceWindow.high - m_config.panViewHigh) < 1e-9;
+        && std::abs(m_traceWindow.low - viewLow) < 1e-9
+        && std::abs(m_traceWindow.high - viewHigh) < 1e-9;
     // Flatten (drawing only) is off while the droop sweep measures: it needs
     // the floor exactly as received.
     const bool flatten = m_config.spectrumFlattenPct > 0 && !m_droopBypassed;
     if (isView) {
         if (!flatten) {
-            emit spectrumReady(m_trace);
+            emit spectrumReady(m_trace, lowHz, highHz);
             return;
         }
         m_publishBins = m_trace;
         flattenNoiseFloor(m_publishBins, m_config.spectrumFlattenPct / 100.0f, m_flatten);
-        emit spectrumReady(m_publishBins);
+        emit spectrumReady(m_publishBins, lowHz, highHz);
         return;
     }
     resamplePanWindow(m_trace, m_traceWindow.low, m_traceWindow.high,
-                      m_config.panViewLow, m_config.panViewHigh,
+                      viewLow, viewHigh,
                       static_cast<std::size_t>(std::max(2, m_config.panPoints)), m_viewBins);
     if (flatten)
         flattenNoiseFloor(m_viewBins, m_config.spectrumFlattenPct / 100.0f, m_flatten);
-    emit spectrumReady(m_viewBins);
+    emit spectrumReady(m_viewBins, lowHz, highHz);
 }
 
 void AnanRxDsp::carryOntoFrameGrid(std::vector<float>& state)
 {
     // The state as it reads on the new frame's grid. Where the old grid did
     // not reach, there is nothing to carry: the new frame's own value starts
-    // those points.
+    // those points. In absolute frequency (brick3-angelia): when the DDC has
+    // moved, the state's window is where it lies in the frame's band.
     const float unknown = std::numeric_limits<float>::quiet_NaN();
-    resamplePanWindow(state, m_traceWindow.low, m_traceWindow.high,
+    const double rate = static_cast<double>(m_config.inputSampleRateHz);
+    const double shift = (m_traceLoHz > 0.0 && m_frameLoHz > 0.0 && rate > 0.0)
+        ? (m_traceLoHz - m_frameLoHz) / rate : 0.0;
+    resamplePanWindow(state, m_traceWindow.low + shift, m_traceWindow.high + shift,
                       m_frameWindow.low, m_frameWindow.high, m_bins.size(), m_carry, &unknown);
     for (std::size_t i = 0; i < m_carry.size(); ++i) {
         if (std::isnan(m_carry[i]))
@@ -705,18 +753,31 @@ void AnanRxDsp::smoothFrame()
         dt = std::clamp(static_cast<double>(m_frameClock.nsecsElapsed()) / 1.0e9, 0.001, 0.25);
     m_frameClock.start();
 
+    maskUncoveredPoints();
+    const bool loMoved = m_traceLoHz > 0.0 && m_frameLoHz > 0.0
+        && std::abs(m_traceLoHz - m_frameLoHz) > 1e-3;
     if (!m_traceValid || m_bins.size() < 2) {
         m_average = m_bins;
         m_trace = m_bins;
-    } else if (m_trace.size() != m_bins.size()
+    } else if (m_trace.size() != m_bins.size() || loMoved
                || std::abs(m_traceWindow.low - m_frameWindow.low) > 1e-12
                || std::abs(m_traceWindow.high - m_frameWindow.high) > 1e-12) {
         // The analyzer was re-aimed (a zoom, a pan past its window, a new
-        // width): keep what has been built up, on the new grid.
+        // width), or the DDC moved (brick3-angelia): keep what has been built
+        // up, where it is in frequency, on the new grid.
         carryOntoFrameGrid(m_average);
         carryOntoFrameGrid(m_trace);
     }
+    // Points the frame's samples do not all cover (the band edge a retune
+    // inside the FFT window has not reached yet) hold what was built up.
+    if (m_frameInvalid.size() == m_bins.size() && m_average.size() == m_bins.size()) {
+        for (std::size_t i = 0; i < m_bins.size(); ++i) {
+            if (m_frameInvalid[i])
+                m_bins[i] = m_average[i];
+        }
+    }
     m_traceWindow = m_frameWindow;
+    m_traceLoHz = m_frameLoHz;
     m_traceValid = true;
 
     averageTowards(m_average, m_bins,
@@ -728,6 +789,43 @@ void AnanRxDsp::smoothFrame()
         followWithBallistics(m_trace, m_average,
                              smoothingAlpha(dt, m_config.spectrumAttackMs / 1000.0),
                              smoothingAlpha(dt, m_config.spectrumDecayMs / 1000.0));
+    }
+}
+
+void AnanRxDsp::maskUncoveredPoints()
+{
+    // Which frame points lie outside what the frame's samples all cover
+    // (relative to m_frameLoHz). Those carry no trustworthy level: a point
+    // with nothing built up there yet takes the frame's noise floor, the rest
+    // hold the running average (smoothFrame()).
+    const std::size_t n = m_bins.size();
+    m_frameInvalid.assign(n, 0);
+    const double rate = static_cast<double>(m_config.inputSampleRateHz);
+    if (n < 2 || !(rate > 0.0) || (m_frameValidLowHz <= -1.0e11 && m_frameValidHighHz >= 1.0e11))
+        return;
+    std::size_t bad = 0;
+    std::vector<float> covered;
+    covered.reserve(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        const double fraction = m_frameWindow.low + (m_frameWindow.high - m_frameWindow.low)
+            * static_cast<double>(i) / static_cast<double>(n - 1);
+        const double relHz = (fraction - 0.5) * rate;
+        if (relHz < m_frameValidLowHz || relHz > m_frameValidHighHz) {
+            m_frameInvalid[i] = 1;
+            ++bad;
+        } else {
+            covered.push_back(m_bins[i]);
+        }
+    }
+    if (bad == 0 || covered.empty())
+        return;
+    // The frame's floor: its 20th percentile over the covered points.
+    const auto k = covered.begin() + static_cast<std::ptrdiff_t>(covered.size() / 5);
+    std::nth_element(covered.begin(), k, covered.end());
+    const float floorDb = *k;
+    for (std::size_t i = 0; i < n; ++i) {
+        if (m_frameInvalid[i])
+            m_bins[i] = floorDb;
     }
 }
 
@@ -860,7 +958,13 @@ void AnanRxDsp::processIqBlock(const std::vector<std::complex<float>>& iq)
     // samples, and none are thrown away. Only TAKING a frame is paced here.
     m_analyzer->feed(iq);
     retargetAnalyzerIfSettled();
-    if (spectrumFrameDue() && m_analyzer->takeFrame(m_bins)) {
+    AnanPanAnalyzer::FrameTag tag;
+    if (spectrumFrameDue() && m_analyzer->takeFrame(m_bins, &tag) && !tag.empty()) {
+        // The frequency the frame was computed for (WDSP patch 25), and what
+        // its samples cover; an untagged frame is at the DDC as it is now.
+        m_frameLoHz = tag.loHz > 0.0 ? tag.loHz : m_ddcLoHz;
+        m_frameValidLowHz = tag.validLowHz;
+        m_frameValidHighHz = tag.validHighHz;
         // Real DDC0 roll-off -- the anti-alias FIR's transition band, not CIC
         // sin(x)/x (see AnanDroopCorrection.h). Applied to each raw frame,
         // before smoothFrame() averages it: a fixed dB offset per point, so

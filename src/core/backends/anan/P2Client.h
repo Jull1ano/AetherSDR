@@ -201,6 +201,11 @@ signals:
     // handleDatagram() call so direct consumers can clear partial FFTs first.
     // Other DDCs have independent sequence counters and are unaffected.
     void ddcSequenceGap(int ddcIndex);
+    // brick3-angelia: a DDC's frequency word was just set (and sent, when the
+    // session runs), on the I/O thread and so in order with ddcIqReady: the
+    // IQ delivered before this was taken at the previous frequency. The
+    // panadapter analyzer marks the retune here (WDSP patch 25).
+    void ddcFrequencySent(int ddcIndex, double hz);
     // This session's own Discovery reply (see the class comment). At most once per
     // start(), unordered relative to linkUp(); AnanBackend reports capabilities from
     // it (field meanings: P2Protocol.h's DiscoveryReply).

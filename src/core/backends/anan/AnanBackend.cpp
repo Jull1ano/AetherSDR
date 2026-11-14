@@ -394,6 +394,15 @@ AnanBackend::AnanBackend(QObject* parent)
             dsp->onSequenceGap();
         }
     }, Qt::DirectConnection);
+    // brick3-angelia: every DDC retune, the moment it goes out and in order
+    // with the IQ (both on the I/O thread): the panadapter analyzer marks it
+    // in its input and rotates older samples onto the new frequency (WDSP
+    // patch 25), so dragging the pan does not double or smear the spectrum.
+    connect(m_client, &P2Client::ddcFrequencySent, m_dsp, [dsp = m_dsp](int ddcIndex, double hz) {
+        if (ddcIndex == kRx1Route.ddc) {
+            dsp->onDdcRetuned(hz);
+        }
+    }, Qt::DirectConnection);
     connect(m_client, &P2Client::discoveryInfoReceived, this,
             [this](quint8 boardId, quint8 firmwareVer, quint8 numDdc) {
         // See capabilities()'s own comment for where these surface. Reported
@@ -458,7 +467,8 @@ AnanBackend::AnanBackend(QObject* parent)
     });
     // Ungated by design: m_dsp emits on m_ioThread, the thread that emits linkDown,
     // so every frame is delivered before disconnected() (contract rule 6).
-    connect(m_dsp, &AnanRxDsp::spectrumReady, this, [this](const std::vector<float>& binsDbfs) {
+    connect(m_dsp, &AnanRxDsp::spectrumReady, this, [this](const std::vector<float>& binsDbfs,
+                                                          double lowHz, double highHz) {
         std::vector<float> dbm(binsDbfs.size());
         // Attenuation added back, as deskHPSDR does for its panadapter: a
         // signal keeps its level when the operator attenuates, and only the
@@ -468,7 +478,15 @@ AnanBackend::AnanBackend(QObject* parent)
             dbm[i] = binsDbfs[i] + kUncalibratedDbfsToDbmOffset + attenuation;
         }
         m_droopCalibrator.onSpectrumFrame(dbm);
-        emit spectrumFrameReady(kSliceId, floatBytes(dbm));
+        // The frame's own RF bounds (brick3-angelia): the display places the
+        // trace and the waterfall row by them, not by wherever the pan has
+        // moved since, so a drag does not wobble or stair-step.
+        SpectrumCoverage geometry;
+        if (lowHz > 0.0 && highHz > lowHz) {
+            geometry.frameLowMhz = lowHz / 1.0e6;
+            geometry.frameHighMhz = highHz / 1.0e6;
+        }
+        emit spectrumFrameReady(kSliceId, floatBytes(dbm), geometry);
     });
     connect(m_dsp, &AnanRxDsp::meterUpdate, this, &AnanBackend::onDspMeter);
 }
@@ -1760,12 +1778,14 @@ void AnanBackend::pushView()
     // In the config too: a build that starts now aims its analyzer here.
     m_pendingDspConfig.panViewLow = low;
     m_pendingDspConfig.panViewHigh = high;
+    m_pendingDspConfig.panViewLoHz = m_ncoHz;
     if (m_dsp) {
         // With the rate the fractions are for: during a rate change the
         // analyzer still running is at the old one (AnanRxDsp::setPanView()).
         QMetaObject::invokeMethod(m_dsp, "setPanView", Qt::QueuedConnection,
                                   Q_ARG(double, low), Q_ARG(double, high),
-                                  Q_ARG(int, m_pendingParams.rx1RateKsps * 1000));
+                                  Q_ARG(int, m_pendingParams.rx1RateKsps * 1000),
+                                  Q_ARG(double, m_ncoHz));
     }
 }
 

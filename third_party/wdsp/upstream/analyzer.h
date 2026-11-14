@@ -28,6 +28,9 @@ warren@wpratt.com
 #define _analyzer_h
 #include "comm.h"
 
+// AetherSDR patch 25: most LO changes one FFT window can straddle.
+#define dMAX_RETUNE_EV 64
+
 typedef struct _dp
 {
 	int max_size;											// maximum fft size to be used
@@ -156,6 +159,32 @@ typedef struct _dp
 	CRITICAL_SECTION cs_dmb;
 	// END CODE TO GET MAX FFT_BIN WITHIN A FREQUENCY RANGE
 
+	// AetherSDR patch 25: retune rotation (brick3-angelia, after the smooth
+	// pan / retune of the Jull1ano Thetis fork's analyzer.c). Every LO change
+	// is marked in the input sample stream; when an FFT window holds samples
+	// taken before the last change, those are frequency-rotated onto the
+	// newest LO (phase continuous, as the radio's NCO), so a frame stays
+	// coherent while the LO moves under a drag. Each pixel frame is tagged
+	// with the LO it is computed for and the part of the band its samples
+	// really cover. Complex input, one sub-span, one LO position only.
+	int rt_enable;											// rotation on (SetAnalyzerRetune)
+	double rt_fs;											// the REAL input sample rate, Hz (sample_rate may be repurposed)
+	double rt_lat_ms;										// from SetAnalyzerLo() to the first sample taken at that LO
+	int rt_lo_valid;										// an LO has been given
+	long long rt_in_count[dMAX_STITCH][dMAX_NUM_FFT];		// input samples received so far
+	long long rt_win_start[dMAX_STITCH][dMAX_NUM_FFT];		// absolute index of the first sample of the last dispatched window
+	int rt_ev_count;										// pending LO changes, oldest first
+	long long rt_ev_idx[dMAX_RETUNE_EV];					// absolute input sample index at which that LO starts
+	double rt_ev_lo[dMAX_RETUNE_EV];						// that LO, Hz
+	double rt_base_lo;										// LO of the samples before rt_ev_idx[0], Hz
+	double rt_fi_lo[dMAX_STITCH][dMAX_NUM_FFT];				// the window just filled: its LO, Hz (0 = unknown)
+	double rt_fi_vlo[dMAX_STITCH][dMAX_NUM_FFT];			// ...and its valid part, Hz relative to that LO
+	double rt_fi_vhi[dMAX_STITCH][dMAX_NUM_FFT];
+	double rt_pix_lo[dMAX_PIXOUTS][dNUM_PIXEL_BUFFS];		// the same, per pixel buffer
+	double rt_pix_vlo[dMAX_PIXOUTS][dNUM_PIXEL_BUFFS];
+	double rt_pix_vhi[dMAX_PIXOUTS][dNUM_PIXEL_BUFFS];
+	CRITICAL_SECTION RetuneSection;
+
 }  dp, *DP;
 
 extern DP pdisp[];
@@ -180,6 +209,25 @@ void DestroyAnalyzer(int disp);
 // AetherSDR patch 24: nonzero plans this display's FFTs with FFTW_ESTIMATE.
 extern __declspec( dllexport )
 void SetDisplayPlanEstimate(int disp, int estimate);
+
+// AetherSDR patch 25: retune rotation. iq_rate_hz is the real input rate;
+// latency_ms the time from SetAnalyzerLo() to the first sample at that LO.
+extern __declspec( dllexport )
+void SetAnalyzerRetune(int disp, int enable, double iq_rate_hz, double latency_ms);
+
+// AetherSDR patch 25: the LO (Hz) just sent to the radio. Call from the
+// thread that feeds Spectrum0(), when the new LO goes out; pending_samples are
+// samples already received but not yet passed to Spectrum0() (older than the
+// change, so they come first).
+extern __declspec( dllexport )
+void SetAnalyzerLo(int disp, double lo_hz, int pending_samples);
+
+// AetherSDR patch 25: GetPixels() plus the frame's tag: the LO it is computed
+// for (Hz, 0 = unknown) and the part of the band its samples cover, Hz
+// relative to that LO (vlo > vhi: too little, drop the frame).
+extern __declspec( dllexport )
+void GetPixelsRetune(int disp, int pixout, dOUTREAL *pix, int *flag,
+					 double *lo_hz, double *vlo_hz, double *vhi_hz);
 
 extern __declspec( dllexport )   
 void SetCalibration (	int disp,

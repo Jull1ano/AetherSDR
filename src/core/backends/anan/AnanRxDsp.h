@@ -83,6 +83,11 @@ public:
         // own follows from it and from the view.
         double panViewLow = 0.0;
         double panViewHigh = 1.0;
+        // brick3-angelia: the DDC frequency panViewLow/High are fractions of
+        // the band around, Hz (0 = not known). With it the view is a place in
+        // absolute frequency, read from each frame at the frequency that
+        // frame was computed for (see onDdcRetuned()).
+        double panViewLoHz = 0.0;
         // brick3-angelia: attack and decay of the trace, ms; 0 = none. A
         // point rises with the one time constant and falls with the other,
         // after the time average above. Kept current by
@@ -281,7 +286,15 @@ public:
     // for another rate than the running analyzer's belongs to the channel
     // being built for that rate: it is held and applied at its install, so
     // the frames still coming at the old rate are not read through it.
-    Q_INVOKABLE void setPanView(double low, double high, int sampleRateHz);
+    Q_INVOKABLE void setPanView(double low, double high, int sampleRateHz, double loHz);
+
+    // brick3-angelia: the DDC frequency was just sent to the radio (P2Client's
+    // ddcFrequencySent, on this thread, in order with the IQ). The analyzer
+    // marks the change in its input and rotates older samples onto the new
+    // frequency (WDSP patch 25), and the trace's running average is kept in
+    // absolute frequency, so a drag that moves the DDC neither doubles nor
+    // smears the spectrum.
+    void onDdcRetuned(double hz);
 
     // Installs the per-bin dB correction for ONE DDC0 rate (AnanDroopCorrection.h).
     // Ignored if `table` is not kDroopCorrectionFftSize long or the rate is not a
@@ -386,7 +399,9 @@ public slots:
 signals:
     void pcmReady(const AetherSDR::PcmFrame& frame);
     void audioReady(const std::vector<float>& stereoPcm);   // interleaved L,R
-    void spectrumReady(const std::vector<float>& binsDbfs); // DC-centred dBFS
+    // DC-centred dBFS over the view; lowHz/highHz are the RF frequencies of the
+    // first and last point when known (0 = the view as last set).
+    void spectrumReady(const std::vector<float>& binsDbfs, double lowHz, double highHz);
     // WDSP's own signal-strength meter (SignalAverage), NOT the RMS of the
     // demodulated audio -- the AGC holds audio level roughly constant, so an
     // audio-RMS meter would barely move with signal strength.
@@ -525,6 +540,16 @@ private:
     std::vector<float> m_trace;
     std::vector<float> m_carry;     // scratch for carryOntoFrameGrid()
     PanWindow m_traceWindow;        // the part of the band m_trace covers
+    // brick3-angelia (WDSP patch 25): the DDC frequency now, the one the frame
+    // in hand was computed for and the one the running trace sits at, Hz
+    // (0 = not known), and which points of the frame its samples cover.
+    double m_ddcLoHz = 0.0;
+    double m_frameLoHz = 0.0;
+    double m_traceLoHz = 0.0;
+    double m_frameValidLowHz = -1.0e12;
+    double m_frameValidHighHz = 1.0e12;
+    std::vector<unsigned char> m_frameInvalid;   // 1 = point outside the frame's coverage
+    void maskUncoveredPoints();
     bool m_traceValid = false;      // m_trace holds something to publish
     // Flatten works on a copy of what is published, never on m_trace or
     // m_average: the smoothing state stays the measurement.

@@ -7097,8 +7097,14 @@ void RadioModel::onBackendSpectrumFrame(int panId, const QByteArray& frame,
     // The PAN feed is already at the operator's rate — the backend caps its own
     // production at the source (IRadioBackend::setPanFrameRate), where a frame
     // that is not due costs nothing instead of being computed and discarded.
-    // So this is a straight pass-through.
-    emit panFeedSpectrumReady(streamId, bins, nowNs);
+    // So this is a straight pass-through -- with the frame's own RF span when
+    // the backend gives one (brick3-angelia), so the display can place it.
+    SpectrumDecodeScale frameScale;
+    if (coverage.hasFrameGeometry()) {
+        frameScale.frameLowMhz = coverage.frameLowMhz;
+        frameScale.frameHighMhz = coverage.frameHighMhz;
+    }
+    emit panFeedSpectrumReady(streamId, bins, nowNs, frameScale);
     if (generation != m_backendReceiverGeneration || session != m_sessionGeneration) { return; }
 
     // Same-observation coverage supplies the wider capture and RF bounds;
@@ -7148,9 +7154,15 @@ void RadioModel::onBackendSpectrumFrame(int panId, const QByteArray& frame,
                 coverageBins.resize(coverage.bins.size() / sizeof(float));
                 memcpy(coverageBins.data(), coverage.bins.constData(), coverage.bins.size());
             }
+            // A viewport row sits where its frame was computed (brick3-angelia),
+            // not where the pan has moved since: no stair-step under a drag.
+            const bool frameGeometry = coverage.empty() && coverage.hasFrameGeometry();
+            const double rowLowMhz = !coverage.empty() ? coverage.lowMhz
+                : (frameGeometry ? coverage.frameLowMhz : panCenterMhz - half);
+            const double rowHighMhz = !coverage.empty() ? coverage.highMhz
+                : (frameGeometry ? coverage.frameHighMhz : panCenterMhz + half);
             emit panFeedWaterfallRowReady(wfId, coverage.empty() ? bins : coverageBins,
-                                          coverage.empty() ? panCenterMhz - half : coverage.lowMhz,
-                                          coverage.empty() ? panCenterMhz + half : coverage.highMhz,
+                                          rowLowMhz, rowHighMhz,
                                           m_backendWfTimecode++, nowNs, !coverage.empty());
         }
     }
