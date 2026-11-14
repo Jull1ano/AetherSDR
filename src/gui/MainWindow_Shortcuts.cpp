@@ -1907,6 +1907,11 @@ void MainWindow::registerShortcutActions()
             applyAppletPanelState(/*floating=*/false, dockedLeft, !visible);
         });
     m_shortcutManager.setAlwaysOn("side_panel_toggle", true);
+    // brick3-angelia: the title bar's pause / resume (freezes the spectrum
+    // and waterfall, e.g. to swap antennas) on P. Keys nothing, so always on.
+    m_shortcutManager.registerAction("display_pause_toggle", "Pause / Resume Display", "Display",
+        QKeySequence(Qt::Key_P), [this]() { setDisplayPaused(!m_displayPaused); });
+    m_shortcutManager.setAlwaysOn("display_pause_toggle", true);
 
     // ── RIT/XIT ─────────────────────────────────────────────────────────
     m_shortcutManager.registerAction("rit_toggle", "RIT Toggle", "RIT/XIT",

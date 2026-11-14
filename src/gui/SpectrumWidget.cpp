@@ -8771,6 +8771,14 @@ void SpectrumWidget::setDisplayFrozen(bool frozen)
     if (m_displayFrozen == frozen)
         return;
     m_displayFrozen = frozen;
+    m_resumeBlendActive = false;
+    m_resumeFromBins.clear();
+    if (!frozen && !m_lastSpectrumInputBins.isEmpty()) {
+        // Glide from what was on screen to what is live now.
+        m_resumeFromBins = m_lastSpectrumInputBins;
+        m_resumeBlendClock.start();
+        m_resumeBlendActive = true;
+    }
     update();
 }
 
@@ -8803,6 +8811,27 @@ void SpectrumWidget::updateSpectrum(const QVector<float>& binsDbm, const Spectru
         }
         return;
     }
+    // brick3-angelia: just resumed from a pause -- the trace glides from the
+    // frozen frame to the live one (smoothstep over kResumeBlendMs) rather
+    // than jumping to it.
+    if (m_resumeBlendActive) {
+        const qint64 ms = m_resumeBlendClock.elapsed();
+        if (ms >= kResumeBlendMs || m_resumeFromBins.size() != binsDbm.size()) {
+            m_resumeBlendActive = false;
+            m_resumeFromBins.clear();
+        } else {
+            float a = static_cast<float>(ms) / static_cast<float>(kResumeBlendMs);
+            a = a * a * (3.0f - 2.0f * a);
+            QVector<float> blended(binsDbm.size());
+            for (int i = 0; i < binsDbm.size(); ++i)
+                blended[i] = m_resumeFromBins[i] + a * (binsDbm[i] - m_resumeFromBins[i]);
+            m_resumeBlendActive = false;   // the blended frame goes the normal way
+            updateSpectrum(blended, decodeScale, heldForPresentation);
+            m_resumeBlendActive = true;
+            return;
+        }
+    }
+    m_lastSpectrumInputBins = binsDbm;
     ++m_fftFrameSequence;
     PerfUpdateScope perfScope(PerfUpdateScope::Kind::Panadapter);
     m_panStats.updateSpectrumCalls++;

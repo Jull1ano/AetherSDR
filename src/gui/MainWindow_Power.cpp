@@ -61,10 +61,10 @@ void MainWindow::refreshPauseButton()
     m_titleBar->setPauseState(m_displayPaused, available,
         !available ? tr("Pause: freezes the spectrum and waterfall. Connect to a radio first.")
         : m_displayPaused
-            ? tr("Paused: the spectrum and waterfall are frozen and this computer's "
-                 "audio is muted; the radio keeps running. Click to resume: the "
-                 "waterfall carries on right under the frozen rows.")
-            : tr("Pause: freeze the spectrum and waterfall and mute this computer's "
+            ? tr("Paused (P): the spectrum and waterfall are frozen and this computer's "
+                 "audio is muted; the radio keeps running. Click or press P to resume: "
+                 "the waterfall carries on right under the frozen rows.")
+            : tr("Pause (P): freeze the spectrum and waterfall and mute this computer's "
                  "audio, e.g. while you change antennas. Resume carries on right "
                  "under the frozen rows, so the two can be compared at a glance."));
 }

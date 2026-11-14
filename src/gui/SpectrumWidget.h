@@ -1855,6 +1855,14 @@ private:
     WfColorScheme m_wfColorScheme{WfColorScheme::Default};
     int   m_wfContrast{50};          // 0-100, 50 = palette as is
     bool  m_displayFrozen{false};    // setDisplayFrozen(): frames dropped
+    // brick3-angelia: on resume the trace glides from the frozen frame to the
+    // live one over kResumeBlendMs (smoothstep) instead of jumping; the
+    // waterfall is not blended, so the change stays one sharp line there.
+    static constexpr qint64 kResumeBlendMs = 450;
+    QVector<float> m_lastSpectrumInputBins;   // the last frame taken in
+    QVector<float> m_resumeFromBins;          // the frozen frame, at resume
+    QElapsedTimer m_resumeBlendClock;
+    bool  m_resumeBlendActive{false};
     int   m_wfPaletteShift{50};      // 0-100, 50 = palette as is
     // Palette the visible RGB rows currently hold. Diverges from the live
     // token only while a stream is parked (see WaterfallStreamState) or a

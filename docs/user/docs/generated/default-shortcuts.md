@@ -184,6 +184,7 @@ These are the actions you can bind in **Settings → Configure Shortcuts...**, w
 | Toggle Active Window Full Screen | `window_fullscreen` | macOS: `Ctrl+Meta+F`; other: `F11` | Window management: works with keyboard shortcuts switched off |
 | Minimal Mode Toggle | `minimal_mode` |   |   |
 | Side Panel Show/Hide | `side_panel_toggle` | `F9` | Works with keyboard shortcuts switched off |
+| Pause / Resume Display | `display_pause_toggle` | `P` | Works with keyboard shortcuts switched off |
 
 ## RIT/XIT
 

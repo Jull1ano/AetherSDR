@@ -237,6 +237,7 @@ private:
     QPushButton* m_powerBtn{nullptr};
     PowerState m_powerState{PowerState::Off};
     QPushButton* m_pauseBtn{nullptr};
+    QWidget* m_powerGroup{nullptr};     // POWER and pause, 6 px apart
     bool m_paused{false};
     QString m_stagedVersion;
     QString      m_updateVersion;

@@ -297,7 +297,14 @@ TitleBar::TitleBar(QWidget* parent)
             return;   // a connect is already under way
         emit powerRequested(state == PowerState::Off);
     });
-    m_hbox->addWidget(m_powerBtn);
+    // POWER and pause sit 6 px apart, as NR4 and MNR in the DSP strip, in a
+    // group of their own (the bar spaces its widgets 16 px).
+    m_powerGroup = new QWidget(this);
+    auto* powerRow = new QHBoxLayout(m_powerGroup);
+    powerRow->setContentsMargins(0, 0, 0, 0);
+    powerRow->setSpacing(6);
+    powerRow->addWidget(m_powerBtn);
+    m_hbox->addWidget(m_powerGroup);
     setPowerState(PowerState::Off, QString());
 
     // brick3-angelia: pause / resume beside POWER. Freezes the spectrum and
@@ -325,8 +332,7 @@ TitleBar::TitleBar(QWidget* parent)
         m_pauseBtn->setChecked(paused);
         emit pauseRequested(!paused);
     });
-    m_hbox->addSpacing(3);
-    m_hbox->addWidget(m_pauseBtn);
+    powerRow->addWidget(m_pauseBtn);
     setPauseState(false, false, QString());
 
     // ── 3. Radio tabs ───────────────────────────────────────────────────────
@@ -1904,8 +1910,7 @@ void TitleBar::setMinimalMode(bool on)
     if (m_freqReadout) m_freqReadout->setVisible(!on);
     if (m_dspStrip) m_dspStrip->setVisible(!on);
     if (m_vfoStrip) m_vfoStrip->setVisible(!on);
-    if (m_powerBtn) m_powerBtn->setVisible(!on);
-    if (m_pauseBtn) m_pauseBtn->setVisible(!on);
+    if (m_powerGroup) m_powerGroup->setVisible(!on);
     m_pcBtn->setVisible(!on);
     m_speakerBtn->setVisible(!on);
     m_headphoneBtn->setVisible(!on);
