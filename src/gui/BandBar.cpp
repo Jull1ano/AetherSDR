@@ -484,9 +484,10 @@ void QuickRxStrip::sync()
     const RxApplet::QuickControls c = controls();
     const QWidget* panel = m_source.data();
 
-    // The presets the panel shows, at most eight, widest first (asked for
-    // on brick3-angelia: 4K 3.6K 3.3K 2.9K over 2.7K 2.4K 2.1K 1.8K). The
-    // panel itself keeps its narrow-to-wide order.
+    // The presets the panel shows, at most eight, as asked for on
+    // brick3-angelia: the narrower half on the top row, narrow to wide
+    // (1.8K 2.1K 2.4K 2.7K), the wider half below it, widest first
+    // (4K 3.6K 3.3K 2.9K). The panel itself keeps its narrow-to-wide order.
     QVector<QPushButton*> visible;
     for (QPushButton* source : c.filterButtons) {
         if (source && source->isVisibleTo(panel))
@@ -494,19 +495,22 @@ void QuickRxStrip::sync()
     }
     if (visible.size() > static_cast<int>(m_filter.size()))
         visible.resize(static_cast<int>(m_filter.size()));
-    std::reverse(visible.begin(), visible.end());
-    int shown = 0;
-    for (QPushButton* source : visible) {
-        m_filterSource[shown] = source;
-        mirrorButton(m_filter[shown], source, panel, true);
-        if (m_filter[shown]->isHidden())
-            m_filter[shown]->show();
-        ++shown;
-    }
-    for (int i = shown; i < static_cast<int>(m_filter.size()); ++i) {
-        m_filterSource[i] = nullptr;
-        if (!m_filter[i]->isHidden())
+    std::array<QPushButton*, kFilterSlots> slotSource{};
+    const int topCount = std::min(kFilterCols, (static_cast<int>(visible.size()) + 1) / 2);
+    for (int i = 0; i < topCount; ++i)
+        slotSource[i] = visible[i];
+    for (int i = topCount, col = 0; i < visible.size() && col < kFilterCols; ++i, ++col)
+        slotSource[kFilterCols + col] = visible[visible.size() - 1 - (i - topCount)];
+    for (int i = 0; i < static_cast<int>(m_filter.size()); ++i) {
+        QPushButton* source = slotSource[i];
+        m_filterSource[i] = source;
+        if (source) {
+            mirrorButton(m_filter[i], source, panel, true);
+            if (m_filter[i]->isHidden())
+                m_filter[i]->show();
+        } else if (!m_filter[i]->isHidden()) {
             m_filter[i]->hide();
+        }
     }
 
     mirrorButton(m_stepDown, c.stepDown, panel, false);
