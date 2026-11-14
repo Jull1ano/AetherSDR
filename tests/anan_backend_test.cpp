@@ -54,6 +54,55 @@ public:
 
 // AnanBackend's friend: the supply rail's meter definition and its averaging
 // window, against an injected clock rather than a status packet every 200 ms.
+// A probe that records its start and opens nothing.
+class RecordingProbe : public ReconnectBusyProbe {
+public:
+    using ReconnectBusyProbe::ReconnectBusyProbe;
+    int starts = 0;
+    void start(const QHostAddress&, quint16, const QByteArray&, Parse, Done done) override
+    {
+        ++starts;
+        armForTest(std::move(done));
+    }
+};
+
+struct P2ClientTestAccess {
+    static void setRunning(P2Client& client, bool running) { client.m_running = running; }
+    static void setLinkUp(P2Client& client, bool up) { client.m_linkUp = up; }
+    static void silence(P2Client& client, qint64 ms) { client.checkStreamSilence(ms); }
+    static quint64 txBytes(const P2Client& client) { return client.m_txBytes; }
+    static constexpr int kSilenceMs = P2Client::kStreamSilenceMs;
+};
+
+// The automatic-reconnect busy probe without a socket: arm it as connectRadio()
+// would, then hand it the radio's answer.
+class AnanBusyProbeTestAccess {
+public:
+    static void arm(AnanBackend& backend, const RadioConnectRequest& request)
+    {
+        if (!backend.m_busyProbe)
+            backend.m_busyProbe = new ReconnectBusyProbe(&backend);
+        backend.m_busyProbeRequest = request;
+        backend.m_busyProbe->armForTest(
+            [&backend](std::optional<bool> streaming) { backend.finishBusyProbe(streaming); });
+    }
+    static void answer(AnanBackend& backend, std::optional<bool> streaming)
+    {
+        backend.m_busyProbe->answerForTest(streaming);
+    }
+    static RecordingProbe* installRecordingProbe(AnanBackend& backend)
+    {
+        delete backend.m_busyProbe;
+        auto* probe = new RecordingProbe(&backend);
+        backend.m_busyProbe = probe;
+        return probe;
+    }
+    static bool probing(const AnanBackend& backend)
+    {
+        return backend.m_busyProbe && backend.m_busyProbe->active();
+    }
+};
+
 class AnanSupplyRailTestAccess {
 public:
     static void defineMeters(AnanBackend& backend) { backend.defineMeters(); }
@@ -83,6 +132,12 @@ namespace {
 class ConnectedAnan : public AnanBackend {
 public:
     bool isConnected() const override { return true; }
+};
+// Records each connect request and opens nothing.
+class RecordingAnan : public AnanBackend {
+public:
+    std::vector<RadioConnectRequest> requests;
+    void connectRadio(const RadioConnectRequest& request) override { requests.push_back(request); }
 };
 }  // namespace
 
@@ -262,6 +317,158 @@ int main(int argc, char** argv)
               "hasHostNoiseBlanker true -- WDSP ANB runs in AnanRxDsp, so the "
               "VFO's NB button has something to drive");
         check(!backend.isConnected(), "not connected before connectRadio() is ever called");
+    }
+
+    // ---- an automatic reconnect never takes the radio from another client ----
+    // Protocol 2 obeys the last controller, so two at once chatter the relays.
+    // An unparseable host stands for the connect itself: startConnect() refuses
+    // it with an error at once, which is how "the connect ran" is observed here
+    // without opening a socket.
+    {
+        check(ReconnectBusyProbe::mayProceed(std::nullopt)
+                  && ReconnectBusyProbe::mayProceed(false)
+                  && !ReconnectBusyProbe::mayProceed(true),
+              "only a reply saying the radio is streaming stops a reconnect; silence never does");
+        check(!ReconnectBusyProbe::mayProceed(std::nullopt, ReconnectBusyProbe::Silence::Wait)
+                  && ReconnectBusyProbe::mayProceed(false, ReconnectBusyProbe::Silence::Wait)
+                  && !ReconnectBusyProbe::mayProceed(true, ReconnectBusyProbe::Silence::Wait),
+              "with Silence::Wait (the HL2's rule) only an idle reply proceeds");
+        AnanBackend backend;
+        QSignalSpy errors(&backend, &IRadioBackend::connectionError);
+        QSignalSpy warnings(&backend, &IRadioBackend::configurationWarning);
+        RadioConnectRequest retry;
+        retry.host = QStringLiteral("not-an-address");
+        retry.automaticReconnect = true;
+
+        AnanBusyProbeTestAccess::arm(backend, retry);
+        AnanBusyProbeTestAccess::answer(backend, true);
+        check(errors.isEmpty() && warnings.count() == 1 && !AnanBusyProbeTestAccess::probing(backend),
+              "a busy radio: no connect, and the operator is told once");
+        AnanBusyProbeTestAccess::arm(backend, retry);
+        AnanBusyProbeTestAccess::answer(backend, true);
+        check(errors.isEmpty() && warnings.count() == 1,
+              "still busy on the next retry: still no connect, and no second warning");
+        AnanBusyProbeTestAccess::answer(backend, false);
+        check(errors.isEmpty(), "a stale answer for a finished probe does nothing");
+
+        AnanBusyProbeTestAccess::arm(backend, retry);
+        AnanBusyProbeTestAccess::answer(backend, false);
+        check(errors.count() == 1, "a free radio: the reconnect goes ahead");
+        AnanBusyProbeTestAccess::arm(backend, retry);
+        AnanBusyProbeTestAccess::answer(backend, std::nullopt);
+        check(errors.count() == 2, "no reply in time: the reconnect goes ahead (fail open)");
+
+        AnanBusyProbeTestAccess::arm(backend, retry);
+        backend.disconnectRadio();
+        AnanBusyProbeTestAccess::answer(backend, false);
+        check(errors.count() == 2 && !AnanBusyProbeTestAccess::probing(backend),
+              "a disconnect during the probe cancels the reconnect");
+
+        // The previous session stops before the probe: a client left running
+        // after a connect timeout would otherwise keep sending this radio its
+        // settings while a busy answer starts nothing new.
+        {
+            AnanBackend stale;
+            RecordingProbe* probe = AnanBusyProbeTestAccess::installRecordingProbe(stale);
+            P2Client* client = AnanSupplyRailTestAccess::client(stale);
+            P2ClientTestAccess::setRunning(*client, true);
+            RadioConnectRequest again;
+            again.host = QStringLiteral("192.0.2.10");   // TEST-NET-1, and the probe opens nothing
+            again.automaticReconnect = true;
+            stale.connectRadio(again);
+            check(probe->starts == 1 && !client->isRunning(),
+                  "an automatic reconnect stops the previous session before it probes");
+            probe->answerForTest(true);
+            check(!client->isRunning(), "and a busy answer leaves it stopped");
+        }
+
+        RadioConnectRequest manual = retry;
+        manual.automaticReconnect = false;
+        backend.connectRadio(manual);
+        check(errors.count() == 3 && !AnanBusyProbeTestAccess::probing(backend),
+              "an operator's connect is not probed");
+    }
+
+    // ---- a session that went silent ends, without stopping the new owner ----
+    // p2app sends everything to whichever client spoke last, so silence while
+    // our keepalives still go out means another client has the radio.
+    {
+        P2Client client;
+        QSignalSpy down(&client, &P2Client::linkDown);
+        P2ClientTestAccess::setRunning(client, true);
+        P2ClientTestAccess::silence(client, P2ClientTestAccess::kSilenceMs + 500);
+        check(client.isRunning() && down.isEmpty(),
+              "a session that never came up is the connect timeout's, not the silence watchdog's");
+        P2ClientTestAccess::setLinkUp(client, true);
+        P2ClientTestAccess::silence(client, P2ClientTestAccess::kSilenceMs - 1);
+        check(client.isRunning() && down.isEmpty(), "a shorter silence leaves a live session alone");
+        const quint64 sent = P2ClientTestAccess::txBytes(client);
+        P2ClientTestAccess::silence(client, P2ClientTestAccess::kSilenceMs);
+        check(!client.isRunning() && down.count() == 1,
+              "3 s of silence on a live session ends it and reports the link down");
+        check(P2ClientTestAccess::txBytes(client) == sent,
+              "and sends the radio nothing: a stop now would stop the client that has it");
+    }
+
+    // ---- RadioModel marks its automatic retry, and only that ----
+    {
+        RadioModel radio;
+        auto owned = std::make_unique<RecordingAnan>();
+        RecordingAnan* backend = owned.get();
+        radio.setBackendForTest(std::move(owned), QStringLiteral("anan"));
+        RadioInfo info;
+        info.family = QStringLiteral("anan");
+        info.serial = QStringLiteral("ANAN-RECONNECT");
+        info.address = QHostAddress(QStringLiteral("192.0.2.10"));   // TEST-NET-1: never contacted
+        info.port = 1024;
+        radio.connectToRadio(info);
+        radio.triggerAutoReconnectForTest();
+        check(backend->requests.size() == 2 && !backend->requests[0].automaticReconnect
+                  && backend->requests[1].automaticReconnect
+                  && backend->requests[1].host == QStringLiteral("192.0.2.10"),
+              "the operator's connect is not marked; RadioModel's automatic retry is");
+    }
+
+    // ---- the G2's own speaker: declared, accepted, reported ----
+    {
+        AnanBackend backend;
+        check(backend.capabilities().radioSpeakerControl
+                  && backend.capabilities().radioSpeakerControl->authority
+                         == SliceFrequencyControl::Authority::Engine,
+              "ANAN declares its own speaker, engine authority");
+        std::optional<bool> reported;
+        QObject::connect(&backend, &IRadioBackend::radioSpeakerAudioReported,
+                         [&](bool on) { reported = on; });
+        check(backend.requestRadioSpeakerAudio(true) == ReceiveDispatch::Dispatched && reported == true,
+              "requestRadioSpeakerAudio(true) is taken and reported");
+        check(backend.requestRadioSpeakerAudio(false) == ReceiveDispatch::Dispatched && reported == false,
+              "and off again");
+    }
+
+    // ---- the speaker report survives a reconnect over a live session ----
+    // connectRadio() reports before the old session's queued linkDown lands, and
+    // RadioModel clears its report on disconnected() (onDisconnected); the next
+    // session's linkUp must report the speaker again.
+    {
+        AnanBackend backend;
+        P2Client* client = AnanSupplyRailTestAccess::client(backend);
+        backend.requestRadioSpeakerAudio(true);
+        QSignalSpy reports(&backend, &IRadioBackend::radioSpeakerAudioReported);
+        emit client->linkDown();   // the old session's, arriving late
+        emit client->linkUp();     // the new session
+        check(!reports.isEmpty() && reports.last().at(0).toBool(),
+              "the new session's linkUp reports the speaker state again");
+    }
+
+    // ---- the blanker publishes at once, like every other receive setter ----
+    {
+        AnanBackend backend;
+        std::optional<bool> nb;
+        QObject::connect(&backend, &IRadioBackend::sliceChanged,
+                         [&](int, const SliceDelta& d) { if (d.nb) nb = d.nb; });
+        backend.setSliceNoiseBlanker(0, AetherSDR::NoiseBlankerKind::Impulse, 60,
+                                     AetherSDR::NoiseBlankerFill::Zero);
+        check(nb == true, "setSliceNoiseBlanker() echoes the blanker immediately");
     }
 
     // ---- setSliceNoiseBlanker: live state for connect and rate change ----
