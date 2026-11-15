@@ -255,6 +255,9 @@ AnanBackend::AnanBackend(QObject* parent)
     m_autoAgcTimer->setInterval(kAutoAgcIntervalMs);
     connect(m_autoAgcTimer, &QTimer::timeout, this, &AnanBackend::applyAutoAgcThreshold);
 
+    m_panRestTimer = new QTimer(this);
+    m_panRestTimer->setSingleShot(true);
+    connect(m_panRestTimer, &QTimer::timeout, this, [this] { panRecentre(); });
     m_tuneThrottleTimer = new QTimer(this);
     m_tuneThrottleTimer->setSingleShot(true);
     connect(m_tuneThrottleTimer, &QTimer::timeout, this, [this] {
@@ -1662,7 +1665,7 @@ void AnanBackend::setLineoutMute(bool mute)
 void AnanBackend::setPanCenter(const QString& panId, double hz, PanCenterIntent intent)
 {
     Q_UNUSED(panId);   // one pan in this phase
-    Q_UNUSED(intent);  // ignored, matching Hl2Backend::setPanCenter
+    // brick3-angelia: a drag moves the view only (see m_pendingViewDrag).
     // A pan centre moves the DDC; the slice keeps its frequency and is pushed
     // along only when it would leave the usable span, so the audio never
     // comes from outside the sampled band (Thetis CTUN). Applied from the
@@ -1674,6 +1677,7 @@ void AnanBackend::setPanCenter(const QString& panId, double hz, PanCenterIntent 
         return;   // nothing to move; also ends a slice-follow echo
     // brick3-angelia: the centre is the VIEW's -- see commitViewRequest().
     m_pendingViewCenterHz = hz;
+    m_pendingViewDrag = intent == PanCenterIntent::Drag;
     queueViewCommit();
 }
 
@@ -1698,15 +1702,51 @@ void AnanBackend::commitViewRequest()
     }
     if (center > 0.0)
         m_viewCenterHz = center;
-    // Zoomed in, the view moves inside the captured band and nothing is
-    // retuned; the DDC follows only once the view reaches the band's edge.
-    // At the whole-band view there is no room, and this is the old "a pan
-    // centre moves the DDC".
-    moveDdcToHoldView();
+    const bool drag = std::exchange(m_pendingViewDrag, false);
+    if (drag && center > 0.0) {
+        // A drag (brick3-angelia, as the aether-ui Thetis): the view moves
+        // alone. Inside the band that is all; past its edge the part beyond
+        // shows nothing until the drag rests and panRecentre() moves the DDC
+        // once -- no retunes, so no audio clicks, while the mouse moves.
+        if (std::abs(viewCenterHz() - m_ncoHz) <= viewSlackHz()) {
+            m_panRetunePending = false;
+            m_panRestTimer->stop();
+        } else {
+            m_panRetunePending = true;
+            m_panRestTimer->start(kPanRestRetuneMs);
+        }
+    } else {
+        // Zoomed in, the view moves inside the captured band and nothing is
+        // retuned; the DDC follows only once the view reaches the band's edge.
+        // At the whole-band view there is no room, and this is the old "a pan
+        // centre moves the DDC".
+        m_panRetunePending = false;
+        m_panRestTimer->stop();
+        moveDdcToHoldView();
+    }
     keepSliceInUsableBand();
     // Republishes the pan in every case, so an optimistic GUI span snaps to
     // what is really shown (a request wider than the band, say).
     scheduleTuneApply();
+}
+
+void AnanBackend::panRecentre()
+{
+    // The drag rested (or ended) with the view past the captured band: the DDC
+    // re-centres on the view, once (the aether-ui Thetis's panRetune). Marked
+    // as a pan, so the newly received part shows at once from a quick
+    // spectrum (WDSP patch 26) instead of waiting a whole FFT window.
+    if (!m_panRetunePending)
+        return;
+    m_panRetunePending = false;
+    if (std::abs(viewCenterHz() - m_ncoHz) <= viewSlackHz())
+        return;   // dragged back inside meanwhile
+    m_ncoHz = viewCenterHz();
+    keepSliceInUsableBand();
+    m_panRetuneArmed = true;
+    m_tunePendingApply = false;
+    applyTuneToRadioAndPan();
+    m_tuneThrottleTimer->start(kTuneThrottleMs);
 }
 
 double AnanBackend::viewSpanHz() const noexcept
@@ -1755,19 +1795,12 @@ std::pair<double, double> AnanBackend::viewFractions() const noexcept
     const double span = viewSpanHz();
     double low = 0.0;
     double high = 1.0;
-    if (rate > 0.0 && span < rate) {
+    if (rate > 0.0) {
+        // brick3-angelia: not clamped -- under a drag the view may reach past
+        // the captured band (fractions below 0 or above 1); the DSP shows
+        // nothing there and keeps its analyzer at the band's edge.
         low = (viewCenterHz() - span / 2.0 - (m_ncoHz - rate / 2.0)) / rate;
         high = low + span / rate;
-        // Inside the band by construction (viewSlackHz()); this only guards
-        // the arithmetic.
-        if (low < 0.0) {
-            high -= low;
-            low = 0.0;
-        }
-        if (high > 1.0) {
-            low = std::max(0.0, low - (high - 1.0));
-            high = 1.0;
-        }
     }
     return {low, high};
 }
@@ -2896,10 +2929,19 @@ void AnanBackend::applyTuneToRadioAndPan()
     // center re-broadcast (PanadapterModel::setCenterBandwidth(), which
     // re-lays-out the spectrum/waterfall geometry on every call). Both are
     // throttled together by scheduleTuneApply() -- see its comment.
+    const bool panRetune = std::exchange(m_panRetuneArmed, false);
     if (m_client && m_connected) {
         const double hz = m_ncoHz;   // the DDC centre, not the slice
+        // A pan's re-centre is marked as one around the send (the DSP lives
+        // on the client's thread, so this is in order with the IQ).
         QMetaObject::invokeMethod(m_client,
-                                  [this, hz]() { m_client->setDdcFrequencyHz(kRx1Route.ddc, hz); },
+                                  [this, hz, panRetune, dsp = m_dsp]() {
+                                      if (panRetune && dsp)
+                                          dsp->armPanRetune(true);
+                                      m_client->setDdcFrequencyHz(kRx1Route.ddc, hz);
+                                      if (panRetune && dsp)
+                                          dsp->armPanRetune(false);
+                                  },
                                   Qt::QueuedConnection);
     }
     // The slice's place inside the span. Sent with the retune so a recentre

@@ -69,12 +69,21 @@ public:
     // What a frame is computed for (WDSP patch 25): the DDC frequency its
     // samples were rotated onto, and the part of the band they all cover, Hz
     // relative to that frequency. loHz 0 = not known (no setLo() yet).
+    // WDSP patch 26: points outside validLow..High may carry a quick fill (a
+    // short FFT of the newest samples, qfLen points; 0 = none) -- a stand-in
+    // until a full window of new samples covers them.
     struct FrameTag {
         double loHz = 0.0;
         double validLowHz = -1.0e12;
         double validHighHz = 1.0e12;
-        [[nodiscard]] bool empty() const noexcept { return validLowHz > validHighHz; }
+        int qfLen = 0;
+        int qfMode = 0;   // the LO change it follows: 1 pan, 2 other
+        [[nodiscard]] bool realEmpty() const noexcept { return validLowHz > validHighHz; }
+        [[nodiscard]] bool empty() const noexcept { return realEmpty() && qfLen <= 0; }
     };
+
+    // The kinds of LO change (WDSP patch 26).
+    enum class LoChange { Pan = 1, Other = 2, BandJump = 3 };
 
     static constexpr int kDefaultWindow = 5;
     static constexpr int kWindowCount = 7;
@@ -174,7 +183,7 @@ public:
     // retuneLatencyMs later and rotates older samples of an FFT window onto
     // the newest frequency, so a drag that moves the DDC does not smear or
     // double the spectrum (after the Jull1ano Thetis fork's smooth pan).
-    void setLo(double hz) noexcept;
+    void setLo(double hz, LoChange kind = LoChange::Other) noexcept;
 
     // The derived analyzer parameters for a given setting -- exposed so tests
     // can pin the formulas without a running analyzer.

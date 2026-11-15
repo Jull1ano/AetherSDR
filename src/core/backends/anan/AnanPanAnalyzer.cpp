@@ -204,16 +204,16 @@ void AnanPanAnalyzer::applySettings()
     SetAnalyzerRetune(m_disp, 1, static_cast<double>(std::max(1, m_settings.sampleRateHz)),
                       latencyMs);
     if (m_loHz > 0.0)
-        SetAnalyzerLo(m_disp, m_loHz, 0);
+        SetAnalyzerLo(m_disp, m_loHz, 0, static_cast<int>(LoChange::Other));
 }
 
-void AnanPanAnalyzer::setLo(double hz) noexcept
+void AnanPanAnalyzer::setLo(double hz, LoChange kind) noexcept
 {
     if (!(hz > 0.0) || !std::isfinite(hz))
         return;
     m_loHz = hz;
     // The staged partial block was received before this change.
-    SetAnalyzerLo(m_disp, hz, static_cast<int>(m_stagedCount));
+    SetAnalyzerLo(m_disp, hz, static_cast<int>(m_stagedCount), static_cast<int>(kind));
 }
 
 void AnanPanAnalyzer::applyAveraging()
@@ -297,6 +297,9 @@ void AnanPanAnalyzer::setViewAndPoints(double viewLow, double viewHigh, int poin
         && viewLow == m_settings.viewLow && viewHigh == m_settings.viewHigh) {
         return;
     }
+    // brick3-angelia: only the cut moved (a pan of a zoomed view) -- WDSP
+    // patch 27 keeps the input ring then, so the staged block stays too.
+    const bool cutOnly = points == m_settings.numPoints && normPoints == m_settings.normPoints;
     m_settings.viewLow = viewLow;
     m_settings.viewHigh = viewHigh;
     m_settings.normPoints = normPoints;
@@ -307,7 +310,8 @@ void AnanPanAnalyzer::setViewAndPoints(double viewLow, double viewHigh, int poin
     // The averaging history is per point, and the points now stand for other
     // frequencies: seed from the next frame, as setNumPoints() does.
     m_seeded = false;
-    m_stagedCount = 0;   // SetAnalyzer() resets the input ring
+    if (!cutOnly)
+        m_stagedCount = 0;   // SetAnalyzer() resets the input ring
     applySettings();
 }
 
@@ -385,7 +389,8 @@ bool AnanPanAnalyzer::takeFrame(std::vector<float>& pointsDb, FrameTag* tag)
     // buffer and leave `pointsDb` untouched when there is no new frame.
     int flag = 0;
     FrameTag t;
-    GetPixelsRetune(m_disp, 0, m_scratch.data(), &flag, &t.loHz, &t.validLowHz, &t.validHighHz);
+    GetPixelsRetune(m_disp, 0, m_scratch.data(), &flag, &t.loHz, &t.validLowHz, &t.validHighHz,
+                    &t.qfLen, &t.qfMode);
     if (flag == 0)
         return false;
     if (tag)

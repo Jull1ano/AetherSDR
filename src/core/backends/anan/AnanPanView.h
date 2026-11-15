@@ -166,6 +166,19 @@ inline void averageTowards(std::vector<float>& state, const std::vector<float>& 
     }
 }
 
+// averageTowards() for one point (brick3-angelia: the trace's points are
+// averaged one by one where they hold data).
+inline float averagedDb(float state, float frame, float alpha, bool logDomain) noexcept
+{
+    if (alpha >= 1.0f)
+        return frame;
+    if (logDomain)
+        return state + alpha * (frame - state);
+    const double power = (1.0 - alpha) * std::pow(10.0, static_cast<double>(state) / 10.0)
+                         + alpha * std::pow(10.0, static_cast<double>(frame) / 10.0);
+    return power > 0.0 ? static_cast<float>(10.0 * std::log10(power)) : frame;
+}
+
 // Attack and decay: `trace` follows `target` (same size) with one share for a
 // point that has to rise and another for one that has to fall. A quick attack
 // with a slower decay lets a signal come up at once and sink back gently.

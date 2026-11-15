@@ -11,6 +11,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <numbers>
 #include <vector>
@@ -296,6 +297,11 @@ public:
     // smears the spectrum.
     void onDdcRetuned(double hz);
 
+    // brick3-angelia: the DDC frequency sent next is a pan's re-centre (the
+    // only LO change the analyzer may quick-fill at once, WDSP patch 26).
+    // AnanBackend sets it around the send, on this thread.
+    void armPanRetune(bool on);
+
     // Installs the per-bin dB correction for ONE DDC0 rate (AnanDroopCorrection.h).
     // Ignored if `table` is not kDroopCorrectionFftSize long or the rate is not a
     // valid DDC0 rate, so bins never misalign. std::vector<float> reuses an already
@@ -548,8 +554,49 @@ private:
     double m_traceLoHz = 0.0;
     double m_frameValidLowHz = -1.0e12;
     double m_frameValidHighHz = 1.0e12;
-    std::vector<unsigned char> m_frameInvalid;   // 1 = point outside the frame's coverage
-    void maskUncoveredPoints();
+    // brick3-angelia (WDSP patch 26, after the aether-ui Thetis): what each
+    // frame point is, and the quick fill the frame carries.
+    static constexpr unsigned char kPointNone = 0;
+    static constexpr unsigned char kPointReal = 1;
+    static constexpr unsigned char kPointQuick = 2;
+    std::vector<unsigned char> m_frameKind;
+    int m_frameQfLen = 0;
+    int m_frameQfMode = 0;
+    void classifyFramePoints();
+    // The trace's points: NaN in m_average / m_trace = no data yet (shown at
+    // the last noise-floor estimate); m_quick = a quick-fill stand-in, which
+    // the first real value replaces.
+    std::vector<unsigned char> m_quick;
+    void carryQuickOntoFrameGrid();
+    static constexpr float kNoFloorDb = -150.0f;
+    float m_floorDb = std::numeric_limits<float>::quiet_NaN();
+    std::vector<float> m_floorScratch;
+    void buildPublishBins(std::vector<float>& out, double& lowHz, double& highHz);
+    // A band change (an LO jump past 0.9 x the rate that is not a pan):
+    // AltSDR's jump hold -- the floor line at once, then nothing until the new
+    // band's first full-window frame, which shows at once.
+    bool m_bandJump = false;
+    double m_bandJumpLoHz = 0.0;
+    bool m_panArm = false;
+    int m_qfStage = 0;   // the quick fill size of the last frame (0 = full)
+    // The glide between fill stages: AltSDR's antenna fade, exactly.
+    QElapsedTimer m_glideClock;
+    double glideNowMs();
+    void easeStart();
+    void applyGlide(std::vector<float>& out, double lowHz, double highHz);
+    std::vector<float> m_shown;
+    double m_shownMean = 0.0;
+    double m_shownAtMs = -1.0;
+    double m_shownLowHz = 0.0;
+    double m_shownHighHz = 0.0;
+    double m_speed = 0.0;
+    int m_easeState = 0;   // 0 none, 1 starting, 2 gliding
+    std::vector<float> m_easeFrom;
+    double m_easeT0Ms = 0.0;
+    double m_easeLenMs = 300.0;
+    double m_easeSlope = 0.0;
+    double m_easeLowHz = 0.0;
+    double m_easeHighHz = 0.0;
     bool m_traceValid = false;      // m_trace holds something to publish
     // Flatten works on a copy of what is published, never on m_trace or
     // m_average: the smoothing state stays the measurement.

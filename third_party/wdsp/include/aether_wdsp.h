@@ -547,9 +547,15 @@ void SetDisplayPlanEstimate(int disp, int estimate);
 // drop the frame). Call SetAnalyzerLo() from the thread that feeds Spectrum0,
 // with the samples received but not yet passed to it as pendingSamples.
 void SetAnalyzerRetune(int disp, int enable, double iqRateHz, double latencyMs);
-void SetAnalyzerLo(int disp, double loHz, int pendingSamples);
+// AetherSDR patch 26 (quick fill): `mode` 1 = a pan's re-centre (the part
+// the older samples cannot cover gets a short FFT of the newest samples at
+// once, growing), 2 = another change (from a quarter window), 3 = a band
+// change (no quick fill). qfLen / qfMode report a quick fill in the frame
+// outside validLow..validHigh (0 = none).
+void SetAnalyzerLo(int disp, double loHz, int pendingSamples, int mode);
 void GetPixelsRetune(int disp, int pixout, float* pixels, int* flag,
-                     double* loHz, double* validLowHz, double* validHighHz);
+                     double* loHz, double* validLowHz, double* validHighHz,
+                     int* qfLen, int* qfMode);
 
 int GetWDSPVersion(void);
 

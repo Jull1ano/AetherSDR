@@ -30,6 +30,9 @@ warren@wpratt.com
 
 // AetherSDR patch 25: most LO changes one FFT window can straddle.
 #define dMAX_RETUNE_EV 64
+// AetherSDR patch 26: quick fill sizes, dQF_MIN << 0 .. dQF_LEVELS - 1.
+#define dQF_MIN		4096
+#define dQF_LEVELS	8
 
 typedef struct _dp
 {
@@ -185,6 +188,29 @@ typedef struct _dp
 	double rt_pix_vhi[dMAX_PIXOUTS][dNUM_PIXEL_BUFFS];
 	CRITICAL_SECTION RetuneSection;
 
+	// AetherSDR patch 26: quick fill (brick3-angelia, after the Jull1ano Thetis
+	// fork's sm_quick_fill). After an LO change the part of the band the
+	// window's older samples cannot cover gets the spectrum of a short FFT of
+	// the newest samples (Welch, noise-matched to the main bins), until a full
+	// window of new samples is in. Each LO change carries a mode: 1 a pan's
+	// re-centre (quick fill at once, growing sizes), 2 another change (from a
+	// quarter window), 3 a band change (none: AltSDR's jump hold).
+	int rt_ev_mode[dMAX_RETUNE_EV];							// the mode of each pending LO change
+	double main_E;											// the main window's energy (sum of squares)
+	fftw_plan qf_plan[dQF_LEVELS];							// plans for (dQF_MIN << k) points (SetAnalyzer)
+	double *qf_win[dQF_LEVELS];								// their 4-term Blackman-Harris windows, coherent gain normalised
+	double qf_E[dQF_LEVELS];								// their window energy
+	int qf_levels;											// sizes planned
+	fftw_complex *qf_in;
+	fftw_complex *qf_out;
+	double *qf_disp;										// the quick spectrum, display order, centred
+	int qf_len;												// its size for the window just filled (0 = none)
+	double qf_bws;											// its bin width, Hz
+	int rt_fi_qf_len[dMAX_STITCH][dMAX_NUM_FFT];			// the window just filled: quick fill size and mode
+	int rt_fi_qf_mode[dMAX_STITCH][dMAX_NUM_FFT];
+	int rt_pix_qf_len[dMAX_PIXOUTS][dNUM_PIXEL_BUFFS];		// the same, per pixel buffer
+	int rt_pix_qf_mode[dMAX_PIXOUTS][dNUM_PIXEL_BUFFS];
+
 }  dp, *DP;
 
 extern DP pdisp[];
@@ -218,16 +244,18 @@ void SetAnalyzerRetune(int disp, int enable, double iq_rate_hz, double latency_m
 // AetherSDR patch 25: the LO (Hz) just sent to the radio. Call from the
 // thread that feeds Spectrum0(), when the new LO goes out; pending_samples are
 // samples already received but not yet passed to Spectrum0() (older than the
-// change, so they come first).
+// change, so they come first). Patch 26: mode 1 = a pan's re-centre, 2 =
+// another change, 3 = a band change (see the struct).
 extern __declspec( dllexport )
-void SetAnalyzerLo(int disp, double lo_hz, int pending_samples);
+void SetAnalyzerLo(int disp, double lo_hz, int pending_samples, int mode);
 
 // AetherSDR patch 25: GetPixels() plus the frame's tag: the LO it is computed
 // for (Hz, 0 = unknown) and the part of the band its samples cover, Hz
 // relative to that LO (vlo > vhi: too little, drop the frame).
+// Patch 26: qf_len / qf_mode, the quick fill in the frame outside vlo..vhi (0 = none).
 extern __declspec( dllexport )
 void GetPixelsRetune(int disp, int pixout, dOUTREAL *pix, int *flag,
-					 double *lo_hz, double *vlo_hz, double *vhi_hz);
+					 double *lo_hz, double *vlo_hz, double *vhi_hz, int *qf_len, int *qf_mode);
 
 extern __declspec( dllexport )   
 void SetCalibration (	int disp,

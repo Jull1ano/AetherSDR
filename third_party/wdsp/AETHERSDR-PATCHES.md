@@ -1337,7 +1337,7 @@ position and complex input:
   the real input rate (the display "sample rate" can be repurposed for level
   normalisation, as `AnanPanAnalyzer` does) and the time from a frequency
   going out to its first sample.
-- `SetAnalyzerLo(disp, lo_hz, pending_samples)` is called on the feeding
+- `SetAnalyzerLo(disp, lo_hz, pending_samples, mode)` is called on the feeding
   thread the moment a new DDC frequency is sent; the change is marked in the
   input stream at `rt_in_count + pending_samples + latency`. `Spectrum0()`
   counts the input (`rt_in_count`), `sendbuf()` records each window's
@@ -1362,3 +1362,55 @@ Marked `// AetherSDR patch 25` in `upstream/analyzer.c` and `upstream/analyzer.h
 **Upstream status.** Not reported.
 
 When updating WDSP, keep this unless upstream's analyzer learns about LO changes itself.
+
+## Patch 26 -- quick fill: the part a pan's re-centre uncovers shows at once (brick3-angelia)
+
+After a DDC re-centre the window's older samples (rotated by patch 25) cover
+only the old span; the newly received part waited a whole FFT window (683 ms
+at 262144 points and 384 ksps). Ported from the aether-ui Thetis fork's
+`sm_quick_fill` (commits 053d9c1, 41b10c1, 798afab):
+
+- Every LO change carries a mode (`SetAnalyzerLo`'s new `mode`): 1 a pan's
+  re-centre, 2 another change, 3 a band change.
+- `rt_fill_window()` calls `rt_quick_fill()` when the window's cut reaches past
+  what its samples cover: short FFTs of the newest samples only, 10 ms after
+  the marked change skipped. Mode 1: the largest power of two with
+  3 x Ls <= the fresh samples (4096 at least); mode 2: nothing before a
+  quarter window, then the largest that fits; mode 3: none (AltSDR's jump
+  hold). Welch over up to 8 half-overlapping segments, 4-term
+  Blackman-Harris windows normalised to coherent gain like the main one, the
+  power scaled by `main_E / qf_E / nseg` so the noise floor matches the main
+  bins (narrow carriers read lower until the full window).
+- `stitch()` puts the quick spectrum into the bins outside the covered part;
+  the frame's tag gains the quick size and mode (`GetPixelsRetune`'s
+  `qf_len` / `qf_mode`). The consumer (`AnanRxDsp`) uses quick values only
+  where it has no real data and lets the first real value start a point over.
+- Plans (FFTW_ESTIMATE) are made in `SetAnalyzer` on a size change and freed in
+  `DestroyAnalyzer`; `new_window()` records `main_E`.
+
+Offline (pan re-centre +100 kHz, FFT 262144): the newly received carrier
+shows 53 ms after the change (4096 points), sizes grow to 65536, the full
+window takes over at 725 ms; the quick part's noise floor within 0.6 dB of
+the real part's. A band change shows nothing until the first full window.
+
+Marked `// AetherSDR patch 26` in `upstream/analyzer.c` and `upstream/analyzer.h`.
+
+**Upstream status.** Not reported.
+
+## Patch 27 -- `SetAnalyzer` keeps the input ring when only the cut moves (brick3-angelia)
+
+`SetAnalyzer` stopped the workers and reset the input ring on every call, so
+re-aiming a zoomed view after a pan threw away the samples patches 25 / 26
+work from and blanked the display for a whole window. When retune rotation is
+on and only `fscLin` / `fscHin` change (same FFT, window, overlap, pixel count,
+one sub-span, one LO position), it now waits for the frame in flight, sets the
+cut and its derived detector values under `ResampleSection`, drops frames
+already waiting (cut the old way) and returns; `Spectrum0()` restarts the
+dispatcher. As the fork's view-only fast path in its `SetAnalyzer`.
+
+Offline: after the cut of a 262144-point analyzer moved, the next frame came
+11 ms later (a reset takes ~682 ms).
+
+Marked `// AetherSDR patch 27` in `upstream/analyzer.c`.
+
+**Upstream status.** Not reported.

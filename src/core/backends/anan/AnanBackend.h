@@ -437,6 +437,19 @@ private:
     double m_pendingViewCenterHz = 0.0;   // 0 = none asked
     double m_pendingViewSpanHz = -1.0;    // below 0 = none asked
     bool m_viewCommitQueued = false;
+    // brick3-angelia, as the aether-ui Thetis (SmoothPan.cs): while the mouse
+    // drags the pan (PanCenterIntent::Drag) the DDC is never retuned -- each
+    // retune clicks the audio, and a drag made up to 30 a second. A view that
+    // leaves the captured band shows nothing past its edge until the DDC
+    // re-centres on the view once, when the drag has rested kPanRestRetuneMs
+    // (a release is a rest too). That re-centre is the only LO change marked
+    // as a pan, so the analyzer may quick-fill it (WDSP patch 26).
+    bool m_pendingViewDrag = false;       // the request being committed is a drag
+    bool m_panRetunePending = false;      // the view has left the band under a drag
+    bool m_panRetuneArmed = false;        // the next DDC frequency sent is a pan's re-centre
+    QTimer* m_panRestTimer = nullptr;
+    static constexpr int kPanRestRetuneMs = 120;
+    void panRecentre();
     // The view was moved: retune the DDC just far enough to keep it inside.
     void moveDdcToHoldView();
     // The DDC was moved: pull the view back inside the captured band.

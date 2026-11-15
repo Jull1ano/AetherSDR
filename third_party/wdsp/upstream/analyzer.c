@@ -174,6 +174,12 @@ void new_window(int disp, int type, int size, double PiAlpha)
 	a->inherent_power_gain = igsum / (double)size;
 	a->inv_enb = 1.0 / (a->inherent_power_gain * a->inv_coherent_gain * a->inv_coherent_gain);
 	// print_window_gain ("windows.txt", type, a->inv_coherent_gain, a->inherent_power_gain);
+	{	// AetherSDR patch 26: the quick fill's noise matching
+		double e = 0.0;
+		for (i = 0; i < size; i++)
+			e += a->window[i] * a->window[i];
+		a->main_E = e;
+	}
 }
 
 // spur elimination, REAL input data
@@ -568,6 +574,25 @@ void stitch(int disp)
 		ptr += a->ss_bins[n];
 		m += a->ss_bins[n];
 	}
+	// AetherSDR patch 26: the bins the frame's samples do not cover take the
+	// quick spectrum of the newest samples
+	if (a->num_stitch == 1 && a->num_fft == 1 && a->rt_fi_qf_len[a->begin_ss][0] > 0
+		&& a->qf_len > 0 && a->qf_disp)
+	{
+		int q, d, hs = a->qf_len / 2, bins = a->out_size - 1 - 2 * a->clip;
+		double bw = a->rt_fs / (double)a->size, f;
+		double vlo = a->rt_fi_vlo[a->begin_ss][0], vhi = a->rt_fi_vhi[a->begin_ss][0];
+		for (q = 0; q < m; q++)
+		{
+			f = ((double)(a->fscL + q) - 0.5 * (double)(bins - 1)) * bw;
+			if (vlo <= vhi && f >= vlo && f <= vhi)
+				continue;
+			d = (int)floor(f / a->qf_bws + 0.5);
+			if (d <= -hs || d >= hs)
+				continue;
+			a->pre_av_out[q] = a->qf_disp[d + hs];
+		}
+	}
 	for (i = 0; i < a->num_pixout; i++)	// for each output
 	{
 		EnterCriticalSection(&a->ResampleSection);
@@ -596,12 +621,16 @@ void stitch(int disp)
 			a->rt_pix_lo[i][a->w_pix_buff[i]] = a->rt_fi_lo[a->begin_ss][0];
 			a->rt_pix_vlo[i][a->w_pix_buff[i]] = a->rt_fi_vlo[a->begin_ss][0];
 			a->rt_pix_vhi[i][a->w_pix_buff[i]] = a->rt_fi_vhi[a->begin_ss][0];
+			a->rt_pix_qf_len[i][a->w_pix_buff[i]] = a->rt_fi_qf_len[a->begin_ss][0];
+			a->rt_pix_qf_mode[i][a->w_pix_buff[i]] = a->rt_fi_qf_mode[a->begin_ss][0];
 		}
 		else
 		{
 			a->rt_pix_lo[i][a->w_pix_buff[i]] = 0.0;
 			a->rt_pix_vlo[i][a->w_pix_buff[i]] = -1.0e12;
 			a->rt_pix_vhi[i][a->w_pix_buff[i]] = 1.0e12;
+			a->rt_pix_qf_len[i][a->w_pix_buff[i]] = 0;
+			a->rt_pix_qf_mode[i][a->w_pix_buff[i]] = 0;
 		}
 		LeaveCriticalSection(&a->ResampleSection);
 
@@ -851,6 +880,130 @@ double GetDetectMaxBin(int disp)
 *																										*
 ********************************************************************************************************/
 
+// AetherSDR patch 26: the quick fill's plans and windows for this FFT size
+// (in SetAnalyzer, under the host's planner lock).
+static void rt_quick_setup(DP a, int sz)
+{
+	int k, i, Ls;
+	for (k = 0; k < dQF_LEVELS; k++)
+	{
+		if (a->qf_plan[k]) { fftw_destroy_plan(a->qf_plan[k]); a->qf_plan[k] = 0; }
+		if (a->qf_win[k]) { _aligned_free(a->qf_win[k]); a->qf_win[k] = 0; }
+	}
+	a->qf_levels = 0;
+	a->qf_len = 0;
+	if (a->qf_in) { fftw_free(a->qf_in); a->qf_in = 0; }
+	if (a->qf_out) { fftw_free(a->qf_out); a->qf_out = 0; }
+	if (a->qf_disp) { _aligned_free(a->qf_disp); a->qf_disp = 0; }
+	if (sz / 2 < dQF_MIN)
+		return;
+	a->qf_in = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * (sz / 2));
+	a->qf_out = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * (sz / 2));
+	a->qf_disp = (double*) malloc0(sizeof(double) * (sz / 2));
+	if (!a->qf_in || !a->qf_out || !a->qf_disp)
+		return;
+	for (k = 0; k < dQF_LEVELS && (dQF_MIN << k) <= sz / 2; k++)
+	{
+		double s = 0.0, e = 0.0, arg;
+		Ls = dQF_MIN << k;
+		a->qf_win[k] = (double*) malloc0(sizeof(double) * Ls);
+		for (i = 0; i < Ls; i++)	// 4-term Blackman-Harris
+		{
+			arg = 6.283185307179586476925286766559 * (double)i / (double)(Ls - 1);
+			a->qf_win[k][i] = 0.35875 - 0.48829 * cos(arg) + 0.14128 * cos(2.0 * arg) - 0.01168 * cos(3.0 * arg);
+			s += a->qf_win[k][i];
+		}
+		for (i = 0; i < Ls; i++)
+		{
+			a->qf_win[k][i] *= (double)Ls / s;		// coherent gain normalised, as the main window
+			e += a->qf_win[k][i] * a->qf_win[k][i];
+		}
+		a->qf_E[k] = e;
+		a->qf_plan[k] = fftw_plan_dft_1d(Ls, a->qf_in, a->qf_out, FFTW_FORWARD, FFTW_ESTIMATE);
+		a->qf_levels = k + 1;
+	}
+}
+
+// AetherSDR patch 26: a short spectrum of the newest samples (all at the
+// newest LO) into qf_disp, when the window's cut reaches past the part its
+// samples cover (vlo..vhi, Hz around the newest LO). Ported from the fork's
+// sm_quick_fill: 10 ms after the marked change skipped (the latency guess);
+// mode 1 the largest power of two with 3 x Ls <= the fresh samples (4096 at
+// least), mode 2 nothing before a quarter window, then the largest that fits;
+// Welch over up to 8 half-overlapping segments, the power matched to the main
+// bins' noise floor (narrow carriers read lower until the full window).
+static void rt_quick_fill(DP a, int ss, int LO, int idx0, long long fresh, int mode,
+						  double vlo, double vhi)
+{
+	int k, i, b, Ls, hs, idx, seg, nseg, bins;
+	double fs = a->rt_fs, bw, f_low, f_high, scale;
+	dINREAL* I = a->I_samples[ss][LO];
+	dINREAL* Q = a->Q_samples[ss][LO];
+	a->qf_len = 0;
+	if (mode == 3 || a->qf_levels <= 0 || fs <= 0.0 || a->main_E <= 0.0 || a->size <= 0)
+		return;
+	// only when the window's cut reaches past what its samples cover
+	bw = fs / (double)a->size;
+	bins = a->out_size - 1 - 2 * a->clip;
+	f_low = ((double)a->fscL - 0.5 * (double)(bins - 1)) * bw;
+	f_high = ((double)(bins - 1 - a->fscH) - 0.5 * (double)(bins - 1)) * bw;
+	if (vlo <= vhi && f_low >= vlo && f_high <= vhi)
+		return;
+	fresh -= (long long)(0.010 * fs);
+	if (mode == 2)
+	{
+		for (k = a->qf_levels - 1; k >= 0; k--)
+			if ((long long)(dQF_MIN << k) <= fresh)
+				break;
+		if (k < 0 || (long long)(dQF_MIN << k) * 4 < (long long)a->size)
+			return;
+	}
+	else
+	{
+		for (k = a->qf_levels - 1; k >= 0; k--)
+			if ((long long)(dQF_MIN << k) * 3 <= fresh)
+				break;
+		if (k < 0)
+		{
+			if (fresh < (long long)dQF_MIN)
+				return;
+			k = 0;
+		}
+	}
+	if (!a->qf_plan[k] || !a->qf_win[k])
+		return;
+	Ls = dQF_MIN << k;
+	hs = Ls / 2;
+	nseg = 1 + (int)((fresh - (long long)Ls) / (long long)hs);
+	if (nseg > 8) nseg = 8;
+	if (nseg < 1) nseg = 1;
+	scale = a->main_E / a->qf_E[k] / (double)nseg;
+	for (i = 0; i < Ls; i++)
+		a->qf_disp[i] = 0.0;
+	for (seg = 0; seg < nseg; seg++)
+	{
+		idx = idx0 + a->size - Ls - seg * hs;
+		while (idx >= a->bsize) idx -= a->bsize;
+		while (idx < 0) idx += a->bsize;
+		for (i = 0; i < Ls; i++)
+		{
+			a->qf_in[i][0] = a->qf_win[k][i] * (double)I[idx];
+			a->qf_in[i][1] = a->qf_win[k][i] * (double)Q[idx];
+			if (++idx >= a->bsize) idx -= a->bsize;
+		}
+		fftw_execute(a->qf_plan[k]);
+		for (i = -hs + 1; i < hs; i++)
+		{
+			b = a->flip[LO] ? -i : i;
+			if (b < 0) b += Ls;
+			a->qf_disp[i + hs] += scale * (a->qf_out[b][0] * a->qf_out[b][0] + a->qf_out[b][1] * a->qf_out[b][1]);
+		}
+	}
+	a->qf_disp[0] = a->qf_disp[1];
+	a->qf_len = Ls;
+	a->qf_bws = fs / (double)Ls;
+}
+
 // AetherSDR patch 25: copy the window into Cfft_in[ss][LO], rotating the
 // samples taken before the last LO change onto the newest LO (ported from the
 // Jull1ano Thetis fork's sm_fill_window). Records the frame's tag in
@@ -861,6 +1014,7 @@ static void rt_fill_window(DP a, int ss, int LO)
 	long long ws = a->rt_win_start[ss][LO];
 	int size = a->size;
 	int i, m, nev = 0, start, end, idx = a->IQO_idx[ss][LO];
+	int idx0 = idx, qf_mode = 0;	// AetherSDR patch 26
 	long long eidx[dMAX_RETUNE_EV];
 	double elo[dMAX_RETUNE_EV];
 	double Fs[dMAX_RETUNE_EV + 1], Gs[dMAX_RETUNE_EV + 1];
@@ -878,12 +1032,14 @@ static void rt_fill_window(DP a, int ss, int LO)
 		a->rt_ev_count--;
 		memmove(a->rt_ev_idx, a->rt_ev_idx + 1, a->rt_ev_count * sizeof(long long));
 		memmove(a->rt_ev_lo, a->rt_ev_lo + 1, a->rt_ev_count * sizeof(double));
+		memmove(a->rt_ev_mode, a->rt_ev_mode + 1, a->rt_ev_count * sizeof(int));
 	}
 	lo0 = a->rt_base_lo;
 	for (m = 0; m < a->rt_ev_count && a->rt_ev_idx[m] < ws + size; m++)
 	{
 		eidx[nev] = a->rt_ev_idx[m] - ws;
 		elo[nev] = a->rt_ev_lo[m];
+		qf_mode = a->rt_ev_mode[m];	// the newest change in the window decides
 		nev++;
 	}
 	LeaveCriticalSection(&a->RetuneSection);
@@ -892,6 +1048,9 @@ static void rt_fill_window(DP a, int ss, int LO)
 	half = 0.5 * fs * (double)(size - 2 * a->clip) / (double)size;
 	a->rt_fi_vlo[ss][LO] = -1.0e12;
 	a->rt_fi_vhi[ss][LO] = 1.0e12;
+	a->rt_fi_qf_len[ss][LO] = 0;
+	a->rt_fi_qf_mode[ss][LO] = 0;
+	a->qf_len = 0;
 
 	if (nev > 0 && fs > 0.0)
 	{
@@ -918,8 +1077,14 @@ static void rt_fill_window(DP a, int ss, int LO)
 		{
 			skip = 1;
 			a->rt_fi_vlo[ss][LO] = 1.0e12;		// too little left: the reader drops this frame
-			a->rt_fi_vhi[ss][LO] = -1.0e12;
+			a->rt_fi_vhi[ss][LO] = -1.0e12;		// (unless the quick fill stands in for all of it)
 		}
+		// AetherSDR patch 26: the part the older samples cannot cover, from the
+		// newest samples
+		rt_quick_fill(a, ss, LO, idx0, (long long)size - eidx[nev - 1], qf_mode,
+					  a->rt_fi_vlo[ss][LO], a->rt_fi_vhi[ss][LO]);
+		a->rt_fi_qf_len[ss][LO] = a->qf_len;
+		a->rt_fi_qf_mode[ss][LO] = a->qf_len > 0 ? qf_mode : 0;
 	}
 
 	if (nev == 0 || skip)
@@ -1003,6 +1168,8 @@ DWORD WINAPI Cspectra (void *pargs)
 		a->rt_fi_lo[ss][LO] = 0.0;
 		a->rt_fi_vlo[ss][LO] = -1.0e12;
 		a->rt_fi_vhi[ss][LO] = 1.0e12;
+		a->rt_fi_qf_len[ss][LO] = 0;
+		a->rt_fi_qf_mode[ss][LO] = 0;
 		for (i = 0; i < a->size; i++)
 		{
 			(a->Cfft_in[ss][LO])[i][0] = a->window[i] * (double)((a->I_samples[ss][LO])[a->IQO_idx[ss][LO]]);
@@ -1356,6 +1523,43 @@ void SetAnalyzer (	int disp,			// display identifier
 	DP a = pdisp[disp];
 	int i, j;
 
+	// AetherSDR patch 27: only the cut of the span moved (a pan of a zoomed
+	// view: same FFT, window, overlap and pixel count). Keep the sample ring and
+	// its LO history -- a reset would throw away the samples the retune
+	// rotation and the quick fill work from (patches 25 / 26) and blank the
+	// display for a whole window. The frame in flight finishes first; frames
+	// already waiting were cut the old way and are dropped.
+	if (a->rt_enable && n_stch == 1 && a->num_stitch == 1 && n_fft == 1 && a->num_fft == 1 &&
+		sz == a->size && typ == a->type && bf_sz == a->buff_size && win_type == a->window_type &&
+		pi == a->PiAlpha && ovrlp == a->overlap && clp == a->clip && n_pix == a->num_pixels &&
+		max_w == a->max_writeahead && n_pixout == a->num_pixout && calset == a->cal_set &&
+		!a->cal_changed && fmin == a->f_min && fmax == a->f_max && *flp == a->flip[0] &&
+		fscLin >= 0.0 && fscHin >= 0.0 &&
+		fscLin + fscHin < (double)(a->out_size - 1 - 2 * a->clip) - 2.0)
+	{
+		EnterCriticalSection(&a->SetAnalyzerSection);
+		InterlockedExchange(&a->end_dispatcher, 1);
+		while (InterlockedAnd(&a->dispatcher, 1))
+			Sleep(1);
+		while (_InterlockedAnd(a->pnum_threads, 1023))
+			Sleep(1);
+		EnterCriticalSection(&a->ResampleSection);
+		a->fsclipL = fscLin;
+		a->fsclipH = fscHin;
+		a->fscL = (int)a->fsclipL;
+		a->fscH = (int)a->fsclipH;
+		a->pix_per_bin = (double)a->num_pixels / ((double)(a->num_stitch * (a->out_size - 1 - 2 * a->clip)) - a->fsclipL - a->fsclipH - 1.0);
+		a->det_offset = -a->pix_per_bin * (a->fsclipL - floor(a->fsclipL));
+		a->bin_per_pix = ((double)(a->num_stitch * (a->out_size - 1 - 2 * a->clip)) - 1.0 - a->fsclipL - a->fsclipH) / ((double)a->num_pixels - 1.0);
+		for (i = 0; i < dMAX_PIXOUTS; i++)
+			for (j = 0; j < dNUM_PIXEL_BUFFS; j++)
+				a->pb_ready[i][j] = 0;
+		LeaveCriticalSection(&a->ResampleSection);
+		InterlockedExchange(&a->end_dispatcher, 0);	// Spectrum0() restarts the dispatcher
+		LeaveCriticalSection(&a->SetAnalyzerSection);
+		return;
+	}
+
 	EnterCriticalSection(&a->SetAnalyzerSection);
 	InterlockedExchange(&a->end_dispatcher, 1);
 	while (InterlockedAnd(&a->dispatcher, 1))
@@ -1392,6 +1596,7 @@ void SetAnalyzer (	int disp,			// display identifier
 		// Setup DetectMaxBin for a 'size' change.
 		calc_dmb(disp, sz);
 		//
+		rt_quick_setup(a, sz);	// AetherSDR patch 26
 
 	}
 
@@ -1641,6 +1846,15 @@ void DestroyAnalyzer(int disp)
 	for (i = 0; i < a->max_stitch; i++)
 		_aligned_free (a->result[i]);
 	_aligned_free (a->window);
+	// AetherSDR patch 26: the quick fill's plans and buffers
+	for (i = 0; i < dQF_LEVELS; i++)
+	{
+		if (a->qf_plan[i]) fftw_destroy_plan(a->qf_plan[i]);
+		if (a->qf_win[i]) _aligned_free(a->qf_win[i]);
+	}
+	if (a->qf_in) fftw_free(a->qf_in);
+	if (a->qf_out) fftw_free(a->qf_out);
+	if (a->qf_disp) _aligned_free(a->qf_disp);
 
 	for (i = 0; i < dMAX_STITCH; i++)
 	{
@@ -1693,7 +1907,7 @@ void GetPixels	(	int disp,
 // AetherSDR patch 25: see analyzer.h.
 PORT
 void GetPixelsRetune(int disp, int pixout, dOUTREAL *pix, int *flag,
-					 double *lo_hz, double *vlo_hz, double *vhi_hz)
+					 double *lo_hz, double *vlo_hz, double *vhi_hz, int *qf_len, int *qf_mode)
 {
 	DP a = pdisp[disp];
 	int r;
@@ -1708,6 +1922,8 @@ void GetPixelsRetune(int disp, int pixout, dOUTREAL *pix, int *flag,
 		*lo_hz = a->rt_pix_lo[pixout][r];
 		*vlo_hz = a->rt_pix_vlo[pixout][r];
 		*vhi_hz = a->rt_pix_vhi[pixout][r];
+		*qf_len = a->rt_pix_qf_len[pixout][r];
+		*qf_mode = a->rt_pix_qf_mode[pixout][r];
 		*flag = 1;
 		InterlockedBitTestAndReset(&(a->pb_ready[pixout][r]), 0);
 	}
@@ -2060,7 +2276,7 @@ void SetAnalyzerRetune (int disp, int enable, double iq_rate_hz, double latency_
 
 // AetherSDR patch 25: see AETHERSDR-PATCHES.md.
 PORT
-void SetAnalyzerLo (int disp, double lo_hz, int pending_samples)
+void SetAnalyzerLo (int disp, double lo_hz, int pending_samples, int mode)
 {
 	DP a = pdisp[disp];
 	long long now;
@@ -2086,7 +2302,9 @@ void SetAnalyzerLo (int disp, double lo_hz, int pending_samples)
 				a->rt_ev_count--;
 				memmove(a->rt_ev_idx, a->rt_ev_idx + 1, a->rt_ev_count * sizeof(long long));
 				memmove(a->rt_ev_lo, a->rt_ev_lo + 1, a->rt_ev_count * sizeof(double));
+				memmove(a->rt_ev_mode, a->rt_ev_mode + 1, a->rt_ev_count * sizeof(int));
 			}
+			a->rt_ev_mode[a->rt_ev_count] = (mode >= 1 && mode <= 3) ? mode : 2;	// patch 26
 			a->rt_ev_idx[a->rt_ev_count] = now + llround(a->rt_lat_ms * 1.0e-3 * a->rt_fs);
 			if (a->rt_ev_count > 0 && a->rt_ev_idx[a->rt_ev_count] < a->rt_ev_idx[a->rt_ev_count - 1])
 				a->rt_ev_idx[a->rt_ev_count] = a->rt_ev_idx[a->rt_ev_count - 1];
