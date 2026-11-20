@@ -25,6 +25,8 @@
 #include <limits>
 
 Q_LOGGING_CATEGORY(lcAnanDefaults, "aether.anan.droopdefaults", QtWarningMsg)
+// The busy-probe reconnect (#7270) logs here, as upstream names it.
+Q_LOGGING_CATEGORY(lcAnan, "aether.anan.backend", QtWarningMsg)
 
 namespace AetherSDR::anan {
 
